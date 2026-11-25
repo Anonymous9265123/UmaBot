@@ -45,7 +45,7 @@ def schedule_text(delivery_minute):
     clock = "" if delivery_minute is None else f"{delivery_minute // 60:02d}:{delivery_minute % 60:02d}"
     return (
         "as soon as an hourly check detects an update"
-        if delivery_minute is None else f"daily at {clock} the bot host's local time"
+        if delivery_minute is None else f"daily at {clock} (bot host's local time)"
     )
 
 
@@ -53,10 +53,14 @@ def scheduled_check_time(now, delivery_minute):
     if delivery_minute is None:
         return now
     hour, minute = divmod(delivery_minute, 60)
-    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    scheduled = now.replace(hour=hour, minute=minute, second=0, microsecond=0, fold=0)
     if scheduled > now:
         scheduled -= timedelta(days=1)
-    return scheduled if now - scheduled < timedelta(minutes=5) else None
+    timestamp = scheduled.timestamp()
+    # A clock change can skip a scheduled time or repeat it an hour later.
+    if datetime.fromtimestamp(timestamp) != scheduled:
+        return None
+    return scheduled if 0 <= now.timestamp() - timestamp < 300 else None
 
 
 def subscription_confirmation(topic, channel, delivery_minute):
@@ -146,7 +150,7 @@ def parse_alert_time(value):
 
 class CustomAlertSettings(discord.ui.Modal, title="Custom alert settings"):
     delivery_time = discord.ui.Label(
-        text="Daily time in the bot host's local time",
+        text="Daily time (bot host's local time)",
         component=discord.ui.TextInput(placeholder="17:30 or 5:30 PM", required=False, max_length=12),
     )
     event_window = discord.ui.Label(
@@ -222,7 +226,7 @@ class AlertPreferences(discord.ui.View):
         self.update_defaults()
         await interaction.response.edit_message(content=self.prompt, view=self)
 
-    @discord.ui.select(placeholder="Choose an alert delivery time")
+    @discord.ui.select(placeholder="Choose a delivery time (bot host's local time)")
     async def timing(self, interaction, select):
         value = select.values[0]
         self.delivery_minute = None if value == "hourly" else int(value)

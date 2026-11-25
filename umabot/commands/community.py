@@ -1,7 +1,7 @@
 """Register EN calendar and event reminder commands."""
 
 import asyncio
-from datetime import datetime
+from time import time
 from urllib.parse import quote
 
 import discord
@@ -44,7 +44,7 @@ def register_community(group, alerts, get_catalog, get_events):
             (row for row in rows if all(isinstance(row.get(key), int) for key in ("start", "end", "id"))),
             key=lambda row: row["start"],
         )
-        now = int(datetime.now().timestamp())
+        now = int(time())
         query = (name or "").strip().casefold()
 
         def matches(row):
@@ -122,7 +122,7 @@ def register_community(group, alerts, get_catalog, get_events):
                     for row in reversed(rows)
                     if row.get("name") and (query in row["name"].casefold() or query == str(row["id"]))
                 ]
-                now = int(datetime.now().timestamp())
+                now = int(time())
                 if not any((row.get("end") or 0) > now for row in rows):
                     if preview := await next_meeting_preview(rows, now):
                         name = preview.get("name_en") or preview.get("name") or ""
@@ -137,7 +137,7 @@ def register_community(group, alerts, get_catalog, get_events):
     @group.command(name="events", description="View current and upcoming EN events, missions, and scout banners")
     async def events(interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
-        now = int(datetime.now().timestamp())
+        now = int(time())
         rows = [event for event in await get_events() if event.end > now]
         if not rows:
             await interaction.edit_original_response(content="GameTora has no current or upcoming EN events available to show.")

@@ -68,7 +68,7 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 
 - `/uma cm` shows the active EN Champions Meeting or the next one. When the EN schedule runs out, it shows a labeled GameTora preview. Search by name to look up a past cup.
 - `/uma events` shows active and upcoming EN events, limited missions, and standard banners from GameTora.
-- Use `/uma alert` to choose a daily delivery time in the bot host's local time or receive alerts as soon as they qualify. Enter a custom time such as `5:30 PM` and choose how soon before an event ends to get a reminder, from 1 to 168 hours. A scheduled reminder is sent only if the event qualifies at the chosen time, and only once per event.
+- Use `/uma alert` to choose a daily delivery time on the computer running UmaBot or receive alerts as soon as they qualify. Enter a custom time such as `5:30 PM` and choose how soon before an event ends to get a reminder, from 1 to 168 hours. Existing schedules keep the same clock time and follow the bot host's time zone. A scheduled reminder is sent only if the event qualifies at the chosen time, and only once per event.
 - Use `/uma reminders` to turn event deadline pings on or off. The default window is 24 hours. Server managers can use `/uma news` or `/uma setup` to select the shared posting channel.
 
 ## Troubleshooting
@@ -78,7 +78,7 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 | The bot fails to log in | Check that you supplied the bot token from the Discord application. If you rotated the token, update `DISCORD_TOKEN` wherever you run the bot. |
 | The bot is online but `/uma` is missing | Confirm the app is installed in the intended server with the scopes above. Check the bot logs for a command sync error and restart after correcting the installation. |
 | Automated posts are missing | Use `/uma setup` to check the selected channel. Verify the bot can view the channel, send messages, embed links, and attach files there. |
-| A deadline ping is missing | Check `/uma reminders` and `/uma alert`. For scheduled delivery, the event must be within your reminder window at the selected time in the bot host's local time. |
+| A deadline ping is missing | Check `/uma reminders` and `/uma alert`. For scheduled delivery, the event must be within your reminder window at the selected time on the computer running UmaBot. |
 | A lookup or feed fails | Check the bot logs and network access to Umapyoi and GameTora. |
 
 ## Contributing
