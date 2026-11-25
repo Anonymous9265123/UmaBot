@@ -6,30 +6,27 @@ UmaBot is an open-source community project. Everyone is welcome to fork the repo
 
 UmaBot was built with help from ChatGPT and may contain mistakes. When opening a pull request, please keep this in mind, verify the behavior you’re changing, and describe any issues you found and how you tested your changes.
 
-## Set up your fork
+## Run your own UmaBot
 
-1. Create your own Discord application and get its bot token. Install the app in your server with the `bot` and `applications.commands` scopes. Give it permission to view its posting channel, send messages, embed links, and attach files. [Discord Developer Portal](https://discord.com/developers/applications)
-2. From the repository folder, install the dependencies and start the bot. On Windows PowerShell, use the commands below.
+You need Python 3.11 or newer and a Discord server where you can install apps. Python 3.13 is tested in CI.
 
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m umabot
-```
+1. **Get the code.** Use **Code → Download ZIP** and extract it, or run `git clone https://github.com/Anonymous9265123/UmaBot.git`. If you're contributing or want your own copy on GitHub, fork the repo first and clone your fork.
+2. **Create a Discord application.** Select **New Application**, open the **Bot** page, and generate or copy the **bot token**. Keep it private. [Discord Developer Portal](https://discord.com/developers/applications)
+3. **Install the app in your server.** On the application's **Installation** page, enable **Guild Install** and select **Discord Provided Link**. Under **Default Install Settings** for **Guild Install**, add `bot` and `applications.commands` with **View Channel**, **Send Messages**, **Embed Links**, and **Attach Files**. Open the install link and select **Add to server**. [Discord installation guide](https://docs.discord.com/developers/quick-start/getting-started#installing-your-app)
+4. **Start UmaBot.** Open a terminal in the folder containing `setup_umabot.py` and run the command for your OS.
 
-On first launch, the terminal asks for a bot token if needed and hides it as you enter it. On Windows, UmaBot saves it encrypted for your Windows account after Discord accepts the login. On other operating systems, use `DISCORD_TOKEN` to avoid entering the token on each launch.
+| OS | Command |
+| --- | --- |
+| Windows PowerShell | `py -3 setup_umabot.py` |
+| macOS or Linux | `python3 setup_umabot.py` |
 
-For unattended hosting, supply `DISCORD_TOKEN` through your host's secret settings. It takes precedence over the saved token.
+The script creates `.venv`, installs dependencies, and starts the bot. Paste the bot token when prompted. The terminal hides your input. In Discord, run `/uma help` to confirm the bot is ready. For automated posts and pings, have someone with **Manage Server** run `/uma setup` and choose a text channel.
 
-On macOS or Linux, use these commands from the repository folder. For unattended runs, set `DISCORD_TOKEN` in the environment that starts the bot.
+### Start again or run on a host
 
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m umabot
-```
+Keep the bot process running to receive commands and send alerts. Run the same setup command after pulling changes to install any updated dependencies. Add `--install-only` to prepare the environment without connecting to Discord.
 
-Keep the bot process running to receive Discord commands and deliver scheduled alerts. In Discord, run `/uma help` to confirm the commands are available, then have a member with **Manage Server** run `/uma setup` and select a text channel for automated posts and pings.
+On Windows, UmaBot saves an interactively entered token encrypted for your Windows account after a successful login. On macOS or Linux, you can enter the token at startup or supply it through `DISCORD_TOKEN`. For unattended hosting on any OS, configure `DISCORD_TOKEN` in your host's secret settings and start the bot with `python -m umabot` using the environment's Python. An environment token takes precedence over the saved Windows token.
 
 ## Project layout
 
