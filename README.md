@@ -51,7 +51,7 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 | --- | --- |
 | `/uma character` | Look up a character by name or numeric ID. |
 | `/uma support`, `/uma cards` | Find a support card by card or character name. |
-| `/uma compare` | Pick the first card, its limit break, the second card, then its limit break (defaults to 4LB). Select **Compare effects** to highlight higher or exclusive values. |
+| `/uma compare` | Pick the first card, its limit break, the second card, then its limit break (defaults to 4LB). Shared stats appear first, followed by stats active on only one card. Select **Card details** for unique effects. |
 | `/uma skill`, `/uma unique` | Find a shared skill or a trainee's unique skill. |
 | `/uma track` | Show a racetrack and its courses, optionally filtered by distance in meters. |
 | `/uma birthdays` | Show today's character birthdays. |

@@ -26,7 +26,7 @@ from ..embeds import (
     support_embed,
 )
 from ..game.support_stats import BASE_LEVELS
-from ..stats import StatsButton, SupportComparisonView, support_comparison
+from ..stats import StatsButton, SupportComparisonView
 from .community import register_community
 from .feedback import register_feedback
 
@@ -410,9 +410,8 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
             selected.append(card)
 
         definitions = {effect["id"]: effect for effect in effects if "id" in effect}
-        embed = support_comparison(selected, (first_lb, second_lb), definitions)
         view = SupportComparisonView(selected, (first_lb, second_lb), definitions, interaction.user.id)
-        await interaction.edit_original_response(embed=embed, view=view)
+        await interaction.edit_original_response(embed=view.effects_embed(), view=view)
 
     compare.autocomplete("first")(support_autocomplete)
     compare.autocomplete("second")(support_autocomplete)

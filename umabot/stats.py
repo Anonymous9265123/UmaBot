@@ -47,7 +47,7 @@ class SupportComparisonView(discord.ui.View):
         self.limit_breaks = limit_breaks
         self.definitions = definitions
         self.user_id = user_id
-        self.show_effects = False
+        self.show_effects = True
 
     async def interaction_check(self, interaction):
         if interaction.user.id == self.user_id:
@@ -69,29 +69,42 @@ class SupportComparisonView(discord.ui.View):
                 for effect_id, *points in card["effects"]
             })
         left, right = values
-        rows = []
+        shared, exclusive = [], []
         for effect_id in dict.fromkeys((*left, *right)):
             first, second = left.get(effect_id), right.get(effect_id)
             if first is None and second is None:
                 continue
             effect = self.definitions.get(effect_id, {})
             name = effect.get("name_en") or effect.get("name_en_eon") or f"Effect #{effect_id}"
-            name = discord.utils.escape_markdown(name)[:100]
+            display_name = discord.utils.escape_markdown(name)[:100]
             a = "—" if first is None else format_effect(effect, first)
             b = "—" if second is None else format_effect(effect, second)
             if first is not None and (second is None or first > second):
                 a = f"**{a}**"
             if second is not None and (first is None or second > first):
                 b = f"**{b}**"
-            rows.append(f"{name} · A {a} | B {b}")
+            rows = shared if first is not None and second is not None else exclusive
+            rows.append((name.casefold(), f"{display_name} · A {a} | B {b}"))
+
+        sections = ["\n".join(headings)]
+        remaining = 24
+        for heading, rows in (("Shared stats", shared), ("Stats active on one card", exclusive)):
+            if rows and remaining:
+                visible = sorted(rows)[:remaining]
+                sections.append(f"**{heading}**\n" + "\n".join(row for _, row in visible))
+                remaining -= len(visible)
+        if not shared and not exclusive:
+            sections.append("No active support effects.")
+        if hidden := len(shared) + len(exclusive) - (24 - remaining):
+            sections.append(f"… and {hidden} more. See **Card details**.")
 
         return discord.Embed(
             title="Support effect comparison",
-            description="\n".join(headings) + "\n\n" + ("\n".join(rows[:24]) or "No active support effects."),
+            description="\n\n".join(sections),
             color=0x58A65C,
         ).set_footer(text="Bold marks a higher or exclusive value · — means inactive or absent")
 
-    @discord.ui.button(label="Compare effects")
+    @discord.ui.button(label="Card details")
     async def toggle(self, interaction, button):
         self.show_effects = not self.show_effects
         button.label = "Card details" if self.show_effects else "Compare effects"
