@@ -9,18 +9,44 @@ from .game.api import build_url
 from .game.support_stats import BASE_LEVELS, support_effects, unique_effects
 
 
+def support_card_url(card):
+    if slug := card.get("url_name"):
+        return f"https://gametora.com/umamusume/supports/{quote(slug, safe='-')}"
+    return build_url(f"support/{card['support_id']}/gametora")
+
+
+def support_comparison(cards, limit_breaks, definitions):
+    """Show the active and unique effects at each selected level cap."""
+    embed = discord.Embed(title="Support card comparison", color=0x58A65C)
+    for card, limit_break in zip(cards, limit_breaks, strict=True):
+        level = BASE_LEVELS[card["rarity"]] + limit_break * 5
+        name = card.get("name_en_gl") or card.get("char_name") or "Support card"
+        title = card.get("title_en") or card.get("title_ja")
+        rarity = {1: "R", 2: "SR", 3: "SSR"}[card["rarity"]]
+        url = support_card_url(card)
+        active, _ = support_effects(card, level, definitions)
+        unique = unique_effects(card, level, definitions, url)
+        lines = [f"**{rarity} · {limit_break}LB · Lv {level}**"]
+        if title:
+            lines.append(discord.utils.escape_markdown(title[:120]))
+        lines.extend(active or ["No active support effects."])
+        lines.extend(["", "**Unique effect**", *(unique or ["None listed."])])
+        details = "\n".join(lines)
+        link = f"\n[View card on GameTora]({url})"
+        budget = 1024 - len(link)
+        if len(details) > budget:
+            details = details[:budget - 2].rsplit("\n", 1)[0] + "\n…"
+        embed.add_field(name=name[:256], value=details + link, inline=True)
+    return embed
+
+
 class SupportStatsView(discord.ui.View):
     def __init__(self, card, definitions):
         super().__init__(timeout=180)
         self.card = card
         self.definitions = definitions
         self.base = BASE_LEVELS[card["rarity"]]
-        card_id = card["support_id"]
-        slug = card.get("url_name")
-        self.url = (
-            f"https://gametora.com/umamusume/supports/{quote(slug, safe='-')}"
-            if slug else build_url(f"support/{card_id}/gametora")
-        )
+        self.url = support_card_url(card)
         self.limit_break.options = [
             discord.SelectOption(label=f"{index}LB · Lv {self.base + index * 5}", value=str(index), default=index == 4)
             for index in range(5)

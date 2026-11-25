@@ -54,10 +54,12 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 | --- | --- |
 | `/uma character` | Look up a character by name or numeric ID. |
 | `/uma support`, `/uma cards` | Find a support card by card or character name. |
+| `/uma compare` | Compare two support cards' active and unique effects. Choose 0–4 limit breaks for each card. Both default to 4. |
 | `/uma skill`, `/uma unique` | Find a shared skill or a trainee's unique skill. |
 | `/uma track` | Show a racetrack and its courses, optionally filtered by distance in meters. |
 | `/uma birthdays` | Show today's character birthdays. |
 | `/uma cm`, `/uma events` | Check the Champions Meeting schedule, EN events, missions, and banners. |
+| `/uma upcoming` | List the next EN banners, events, missions, and Champions Meetings in start-date order over the next 30 days. |
 | `/uma subscriptions` | View or remove your character and support card subscriptions by category. |
 | `/uma alert`, `/uma reminders` | Set your alert delivery time and event reminder window, or turn deadline pings on or off. |
 | `/uma setup`, `/uma news` | Set the shared posting channel. Requires **Manage Server**. |

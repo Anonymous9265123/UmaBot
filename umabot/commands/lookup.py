@@ -14,6 +14,7 @@ from ..game.api import (
     build_url,
     fetch_record,
     related_character_data,
+    support_catalog_rows,
     support_character_name,
     support_name,
 )
@@ -24,7 +25,8 @@ from ..embeds import (
     skill_embed,
     support_embed,
 )
-from ..stats import StatsButton
+from ..game.support_stats import BASE_LEVELS
+from ..stats import StatsButton, support_comparison
 from .community import register_community
 from .feedback import register_feedback
 
@@ -362,6 +364,54 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
 
     cards = group.command(name="cards", description=support.description)(support.callback)
     cards.autocomplete("name")(support_autocomplete)
+
+    @group.command(name="compare", description="Compare two support cards at their selected limit breaks")
+    @app_commands.describe(
+        first="First support card name or ID",
+        second="Second support card name or ID",
+        first_lb="Limit breaks for the first card (default 4)",
+        second_lb="Limit breaks for the second card (default 4)",
+    )
+    async def compare(
+        interaction: discord.Interaction,
+        first: app_commands.Range[str, 1, 100],
+        second: app_commands.Range[str, 1, 100],
+        first_lb: app_commands.Range[int, 0, 4] = 4,
+        second_lb: app_commands.Range[int, 0, 4] = 4,
+    ):
+        await interaction.response.defer(thinking=True)
+        raw_cards, effects = await asyncio.gather(
+            feeds.catalog("support-cards"), feeds.catalog("support_effects"),
+        )
+        if not raw_cards or not effects:
+            await interaction.edit_original_response(content="Support card stats are temporarily unavailable.")
+            return
+
+        records = support_catalog_rows(raw_cards)
+        cards_by_id = {card["id"]: card for card in records}
+        selected = []
+        for position, query in (("first", first), ("second", second)):
+            query = query.strip()
+            if query.isascii() and query.isdecimal():
+                card_id = int(query)
+            else:
+                matches = name_matches(records, query, support=True) if normalize_name(query) else []
+                card_id = matches[0][2] if matches else None
+            card = cards_by_id.get(card_id)
+            if card is None:
+                await interaction.edit_original_response(content=f"No match for the {position} support card. Try a card name or ID.")
+                return
+            if card.get("rarity") not in BASE_LEVELS or not card.get("effects"):
+                await interaction.edit_original_response(content=f"Stats are unavailable for the {position} support card.")
+                return
+            selected.append(card)
+
+        definitions = {effect["id"]: effect for effect in effects if "id" in effect}
+        embed = support_comparison(selected, (first_lb, second_lb), definitions)
+        await interaction.edit_original_response(embed=embed)
+
+    compare.autocomplete("first")(support_autocomplete)
+    compare.autocomplete("second")(support_autocomplete)
 
     register_community(group, alerts, get_catalog, feeds.events)
     if feedback is not None:

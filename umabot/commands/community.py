@@ -159,6 +159,32 @@ def register_community(group, alerts, get_catalog, get_events):
         embed.set_footer(text="GameTora · Use /uma reminders to get ending-soon pings")
         await interaction.edit_original_response(embed=embed)
 
+    @group.command(name="upcoming", description="See upcoming EN banners, events, and Champions Meetings in date order")
+    async def upcoming(interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        rows = await get_events()
+        now = int(time())
+        scheduled = sorted(
+            (event for event in rows if now < event.start <= now + 30 * 86400),
+            key=lambda event: (event.start, event.category, event.title),
+        )
+        if not scheduled:
+            await interaction.edit_original_response(content="No upcoming EN schedule entries are available for the next 30 days.")
+            return
+
+        lines = [
+            f"<t:{event.start}:f> · **{event.category}** · {discord.utils.escape_markdown(event.title[:110])}"
+            for event in scheduled[:12]
+        ]
+        embed = discord.Embed(
+            title="Upcoming EN schedule · Next 30 days",
+            url="https://gametora.com/umamusume/events",
+            description="\n".join(lines),
+            color=0x58A65C,
+        )
+        embed.set_footer(text=f"GameTora · Showing {len(lines)} of {len(scheduled)} entries")
+        await interaction.edit_original_response(embed=embed)
+
     if alerts is None:
         return
 
