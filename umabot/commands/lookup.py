@@ -365,19 +365,22 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     cards = group.command(name="cards", description=support.description)(support.callback)
     cards.autocomplete("name")(support_autocomplete)
 
+    limit_break_choices = [app_commands.Choice(name=f"{level}LB", value=level) for level in range(5)]
+
     @group.command(name="compare", description="Compare two support cards at their selected limit breaks")
     @app_commands.describe(
         first="First support card name or ID",
+        first_lb="Limit breaks for the first card",
         second="Second support card name or ID",
-        first_lb="Limit breaks for the first card (default 4)",
         second_lb="Limit breaks for the second card (default 4)",
     )
+    @app_commands.choices(first_lb=limit_break_choices, second_lb=limit_break_choices)
     async def compare(
         interaction: discord.Interaction,
         first: app_commands.Range[str, 1, 100],
+        first_lb: int,
         second: app_commands.Range[str, 1, 100],
-        first_lb: app_commands.Range[int, 0, 4] = 4,
-        second_lb: app_commands.Range[int, 0, 4] = 4,
+        second_lb: int = 4,
     ):
         await interaction.response.defer(thinking=True)
         raw_cards, effects = await asyncio.gather(
