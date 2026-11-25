@@ -6,7 +6,7 @@ from urllib.parse import quote
 import discord
 
 from .game.api import build_url
-from .game.support_stats import BASE_LEVELS, support_effects, unique_effects
+from .game.support_stats import BASE_LEVELS, effect_at_level, format_effect, support_effects, unique_effects
 
 
 def support_card_url(card):
@@ -38,6 +38,67 @@ def support_comparison(cards, limit_breaks, definitions):
             details = details[:budget - 2].rsplit("\n", 1)[0] + "\n…"
         embed.add_field(name=name[:256], value=details + link, inline=True)
     return embed
+
+
+class SupportComparisonView(discord.ui.View):
+    def __init__(self, cards, limit_breaks, definitions, user_id):
+        super().__init__(timeout=180)
+        self.cards = cards
+        self.limit_breaks = limit_breaks
+        self.definitions = definitions
+        self.user_id = user_id
+        self.show_effects = False
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Run /uma compare to change your own comparison view.", ephemeral=True)
+        return False
+
+    def effects_embed(self):
+        headings = []
+        values = []
+        for label, card, limit_break in zip(("A", "B"), self.cards, self.limit_breaks, strict=True):
+            level = BASE_LEVELS[card["rarity"]] + limit_break * 5
+            name = card.get("name_en_gl") or card.get("char_name") or "Support card"
+            title = card.get("title_en") or card.get("title_ja")
+            name = discord.utils.escape_markdown(f"{name} · {title}" if title else name)[:130]
+            headings.append(f"**{label}** {name} · {limit_break}LB · Lv {level}")
+            values.append({
+                effect_id: effect_at_level(points, level)[0]
+                for effect_id, *points in card["effects"]
+            })
+        left, right = values
+        rows = []
+        for effect_id in dict.fromkeys((*left, *right)):
+            first, second = left.get(effect_id), right.get(effect_id)
+            if first is None and second is None:
+                continue
+            effect = self.definitions.get(effect_id, {})
+            name = effect.get("name_en") or effect.get("name_en_eon") or f"Effect #{effect_id}"
+            name = discord.utils.escape_markdown(name)[:100]
+            a = "—" if first is None else format_effect(effect, first)
+            b = "—" if second is None else format_effect(effect, second)
+            if first is not None and (second is None or first > second):
+                a = f"**{a}**"
+            if second is not None and (first is None or second > first):
+                b = f"**{b}**"
+            rows.append(f"{name} · A {a} | B {b}")
+
+        return discord.Embed(
+            title="Support effect comparison",
+            description="\n".join(headings) + "\n\n" + ("\n".join(rows[:24]) or "No active support effects."),
+            color=0x58A65C,
+        ).set_footer(text="Bold marks a higher or exclusive value · — means inactive or absent")
+
+    @discord.ui.button(label="Compare effects")
+    async def toggle(self, interaction, button):
+        self.show_effects = not self.show_effects
+        button.label = "Card details" if self.show_effects else "Compare effects"
+        embed = self.effects_embed() if self.show_effects else support_comparison(
+            self.cards, self.limit_breaks, self.definitions,
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 class SupportStatsView(discord.ui.View):

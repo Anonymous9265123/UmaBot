@@ -7,8 +7,11 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
-from ..alerts import alert_channel
-from ..game.calendar import CM_CATALOG, CM_FORECAST_CATALOG, CM_REFERENCE_CATALOG, CM_URL
+from ..alerts import alert_channel, parse_alert_time
+from ..game.calendar import BANNER_CATALOGS, CM_CATALOG, CM_FORECAST_CATALOG, CM_REFERENCE_CATALOG, CM_URL
+
+
+WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
 def register_community(group, alerts, get_catalog, get_events, get_projections):
@@ -159,6 +162,32 @@ def register_community(group, alerts, get_catalog, get_events, get_projections):
         embed.set_footer(text="GameTora · Use /uma reminders to get ending-soon pings")
         await interaction.edit_original_response(embed=embed)
 
+    @group.command(name="banner", description="See active EN trainee and support banners and their featured picks")
+    async def banner(interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        events = await get_events()
+        now = int(time())
+        active = sorted(
+            (event for event in events if event.category in BANNER_CATALOGS.values() and event.start <= now < event.end),
+            key=lambda event: event.end,
+        )
+        if not active:
+            await interaction.edit_original_response(content="UmaBot found no active EN standard banners in the GameTora data it received.")
+            return
+        embed = discord.Embed(title="Current EN standard banners", color=0x58A65C)
+        for category, heading in zip(BANNER_CATALOGS.values(), ("Trainee banners", "Support card banners"), strict=True):
+            banners = [event for event in active if event.category == category]
+            lines = []
+            for event in banners[:5]:
+                featured = ", ".join(event.featured) if event.featured else "Featured picks unavailable"
+                featured = discord.utils.escape_markdown(featured)[:145]
+                lines.append(f"{featured} · Ends <t:{event.end}:f> (<t:{event.end}:R>)")
+            if len(banners) > len(lines):
+                lines.append(f"… and {len(banners) - len(lines)} more.")
+            embed.add_field(name=heading, value="\n".join(lines) or "None listed.", inline=False)
+        embed.set_footer(text="GameTora · Use /uma upcoming for future banners")
+        await interaction.edit_original_response(embed=embed)
+
     @group.command(name="upcoming", description="See upcoming EN banners, events, and Champions Meetings in date order")
     async def upcoming(interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
@@ -206,6 +235,57 @@ def register_community(group, alerts, get_catalog, get_events, get_projections):
 
     if alerts is None:
         return
+
+    @group.command(name="digest", description="View or configure this server's weekly EN schedule digest")
+    @app_commands.describe(
+        channel="Channel for the weekly digest",
+        day="Weekday to post (defaults to Monday)",
+        delivery_time="Bot host's local time, such as 09:00 or 5:30 PM",
+        enabled="Set to False to turn off the digest",
+    )
+    @app_commands.choices(day=[app_commands.Choice(name=day, value=index) for index, day in enumerate(WEEKDAYS)])
+    async def digest(
+        interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
+        day: app_commands.Choice[int] | None = None,
+        delivery_time: app_commands.Range[str, 1, 12] | None = None,
+        enabled: bool | None = None,
+    ):
+        if not interaction.permissions.manage_guild:
+            await interaction.response.send_message("You need Manage Server to configure the weekly digest.", ephemeral=True)
+            return
+        setting = alerts.digest_setting()
+        if enabled is False:
+            alerts.set_digest(None)
+            await interaction.response.send_message("Weekly digest is off.", ephemeral=True)
+            return
+
+        channel_id, weekday, minute = setting or (None, 0, 540)
+        if channel is not None or day is not None or delivery_time is not None or enabled is True:
+            channel = channel if channel is not None else interaction.guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.response.send_message("Choose a text channel for the weekly digest.", ephemeral=True)
+                return
+            permissions = channel.permissions_for(interaction.guild.me)
+            if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+                await interaction.response.send_message(
+                    "UmaBot needs View Channel, Send Messages, and Embed Links in that channel.", ephemeral=True,
+                )
+                return
+            try:
+                minute = parse_alert_time(delivery_time) if delivery_time is not None else minute
+            except ValueError as error:
+                await interaction.response.send_message(str(error), ephemeral=True)
+                return
+            channel_id = channel.id
+            weekday = day.value if day is not None else weekday
+            alerts.set_digest(channel_id, weekday, minute)
+        if channel_id is None:
+            message = "Weekly digest is off. Use `/uma digest` with a channel to turn it on."
+        else:
+            hour, minute = divmod(minute, 60)
+            message = f"Weekly digest posts in <#{channel_id}> on {WEEKDAYS[weekday]} at {hour:02d}:{minute:02d} (bot host's local time)."
+        await interaction.response.send_message(message, ephemeral=True)
 
     @group.command(name="reminders", description="Turn ending-soon event reminders on or off")
     async def reminders(interaction: discord.Interaction, enabled: bool):

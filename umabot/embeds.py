@@ -10,6 +10,36 @@ from .game.api import build_url, en_release_status, sns_icon_url, support_charac
 from .game.conditions import explain_conditions
 
 
+def weekly_digest_embed(events, projections, now):
+    """Summarize confirmed dates and separately labeled forecasts for the next week."""
+    cutoff = now + 7 * 86400
+    ending = sorted((event for event in events if event.start <= now < event.end <= cutoff), key=lambda event: event.end)
+    starting = sorted((event for event in events if now < event.start <= cutoff), key=lambda event: event.start)
+    embed = discord.Embed(title="Weekly EN digest", color=0x58A65C)
+    for label, entries, date in (("Ending in the next 7 days", ending, "end"), ("Starting in the next 7 days", starting, "start")):
+        lines = [
+            f"<t:{getattr(event, date)}:f> · {event.category} · {discord.utils.escape_markdown(event.title)[:100]}"
+            for event in entries[:5]
+        ]
+        if len(entries) > len(lines):
+            lines.append(f"… and {len(entries) - len(lines)} more. See /uma events.")
+        embed.add_field(name=label, value="\n".join(lines) or "No confirmed entries listed.", inline=False)
+    forecasts = [(start, category, title) for start, category, title in projections if now < start <= cutoff]
+    if forecasts:
+        lines = [
+            f"<t:{start}:D> · {category} · {discord.utils.escape_markdown(title)[:100]}"
+            for start, category, title in forecasts[:5]
+        ]
+        if len(forecasts) > len(lines):
+            lines.append(f"… and {len(forecasts) - len(lines)} more. See /uma upcoming.")
+        embed.add_field(
+            name="Unconfirmed EN forecasts",
+            value="Estimates based on Japanese releases. Dates and lineups may change.\n" + "\n".join(lines),
+            inline=False,
+        )
+    return embed.set_footer(text="GameTora · See /uma upcoming for the full schedule")
+
+
 class ArticleText(HTMLParser):
     """Convert a news article's HTML into readable paragraphs."""
 

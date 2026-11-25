@@ -13,7 +13,7 @@ from time import monotonic, time
 import discord
 from discord.ext import tasks
 
-from .embeds import news_embeds
+from .embeds import news_embeds, weekly_digest_embed
 from .game.api import build_url, en_release_date, en_release_status, support_name
 from .game.feeds import FEED_TTL
 
@@ -365,6 +365,10 @@ class UmaAlerts:
                 CREATE TABLE IF NOT EXISTS news_deliveries (
                     guild_id INTEGER, news_key TEXT, PRIMARY KEY (guild_id, news_key)
                 );
+                CREATE TABLE IF NOT EXISTS weekly_digest (
+                    guild_id INTEGER PRIMARY KEY, channel_id INTEGER, weekday INTEGER NOT NULL,
+                    delivery_minute INTEGER NOT NULL, last_sent_week TEXT
+                );
             """)
             columns = {row[1] for row in db.execute("PRAGMA table_info(subscriptions)")}
             if "delivery_hour" not in columns:
@@ -523,8 +527,60 @@ class UmaAlerts:
                     (event.key, user_id) for user_id in batch
                 ])
 
+    def digest_setting(self):
+        with self.database() as db:
+            return db.execute(
+                "SELECT channel_id, weekday, delivery_minute FROM weekly_digest WHERE guild_id = ? AND channel_id IS NOT NULL",
+                (self.guild_id,),
+            ).fetchone()
+
+    def set_digest(self, channel_id, weekday=0, delivery_minute=540):
+        with self.database() as db:
+            db.execute("""
+                INSERT INTO weekly_digest (guild_id, channel_id, weekday, delivery_minute)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    channel_id = excluded.channel_id, weekday = excluded.weekday,
+                    delivery_minute = excluded.delivery_minute
+            """, (self.guild_id, channel_id, weekday, delivery_minute))
+
+    async def check_digest(self, now):
+        """Deliver once per local week and retry failed posts on the scheduled day."""
+        setting = self.digest_setting()
+        if setting is None:
+            return
+        channel_id, weekday, minute = setting
+        if now.weekday() != weekday or now.hour * 60 + now.minute < minute:
+            return
+        week = (now.date() - timedelta(days=now.weekday())).isoformat()
+        with self.database() as db:
+            if db.execute(
+                "SELECT 1 FROM weekly_digest WHERE guild_id = ? AND last_sent_week = ?", (self.guild_id, week),
+            ).fetchone():
+                return
+        timestamp = int(now.timestamp())
+        events = await self.feeds.events()
+        forecasts = await self.feeds.projections(events, timestamp)
+        if self.digest_setting() != setting:
+            return
+        nonce = hashlib.blake2s(f"digest:{self.guild_id}:{week}".encode(), digest_size=10).hexdigest()
+        try:
+            await self.client.get_partial_messageable(channel_id).send(
+                embed=weekly_digest_embed(events, forecasts, timestamp),
+                allowed_mentions=discord.AllowedMentions.none(),
+                nonce=nonce,
+            )
+        except discord.HTTPException:
+            log.warning("Could not post the weekly digest in channel %s", channel_id, exc_info=True)
+            return
+        with self.database() as db:
+            db.execute(
+                "UPDATE weekly_digest SET last_sent_week = ? WHERE guild_id = ?", (week, self.guild_id),
+            )
+
     @tasks.loop(minutes=1)
     async def poll(self):
+        await self.check_digest(datetime.now())
         setting = self.posting_setting()
         if setting is None:
             return

@@ -8,13 +8,16 @@ CM_CATALOG = "en/events/champions-meeting"
 CM_REFERENCE_CATALOG = "events/champions-meeting"
 CM_FORECAST_CATALOG = "en/foresight/timeline"
 CM_URL = "https://gametora.com/umamusume/events/champions-meeting"
+BANNER_CATALOGS = {
+    "en/gacha/char-standard": "Scout banners",
+    "en/gacha/support-standard": "Support banners",
+}
 EVENT_CATALOGS = {
     CM_CATALOG: "Champions Meeting",
     "en/events/legend-race": "Legend Races",
     "en/storyevents": "Story events",
     "en/missions/limited": "Limited missions",
-    "en/gacha/char-standard": "Scout banners",
-    "en/gacha/support-standard": "Support banners",
+    **BANNER_CATALOGS,
 }
 FORECAST_CATALOGS = {
     "future_cm": CM_CATALOG,
@@ -31,6 +34,7 @@ class GameEvent:
     title: str
     start: int
     end: int
+    featured: tuple[str, ...] = ()
 
 
 def event_timestamp(value):
@@ -39,10 +43,13 @@ def event_timestamp(value):
     return value // 1000 if value >= 100_000_000_000 else value
 
 
-def featured_title(ids, names):
-    featured = list(dict.fromkeys(
+def featured_names(ids, names):
+    return tuple(dict.fromkeys(
         names[card_id] for card_id in ids if type(card_id) is int and names.get(card_id)
     ))
+
+
+def featured_title(featured):
     title = ", ".join(featured[:3])
     if len(featured) > 3:
         title += f" +{len(featured) - 3}"
@@ -82,7 +89,7 @@ async def projected_events(timeline, get_catalog, confirmed, now):
         category = EVENT_CATALOGS[source]
         title = row.get("name_en") or row.get("name")
         if source in banner_names and isinstance(row.get("pickup_ids"), list):
-            title = featured_title(row["pickup_ids"], banner_names[source])
+            title = featured_title(featured_names(row["pickup_ids"], banner_names[source]))
         if source == "en/storyevents":
             title = story_names.get(row["id"])
         entries.append((start, category, title or f"#{row['id']}"))
@@ -113,11 +120,13 @@ async def game_events(get_catalog, now, *, ending_within=None):
 
     events = {}
     for key, category, title, event_id, start, end, row in visible:
+        featured = ()
         if key in banner_names:
             pickups = (pickup[0] for pickup in row.get("pickups", []) if isinstance(pickup, list) and pickup)
-            title = featured_title(pickups, banner_names[key]) or title
+            featured = featured_names(pickups, banner_names[key])
+            title = featured_title(featured) or title
         if not title:
             title = f"{category} #{event_id}" if event_id is not None else category
         identity = f"{key}:{event_id}:{start}"
-        events[identity] = GameEvent(identity, category, title, start, end)
+        events[identity] = GameEvent(identity, category, title, start, end, featured)
     return sorted(events.values(), key=lambda event: (event.start > now, event.end if event.start <= now else event.start))
