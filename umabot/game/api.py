@@ -130,7 +130,7 @@ async def gametora_manifest(session):
         return await response.json(content_type=None)
 
 
-async def gametora_catalog(session, category, *, manifest=None, list_key=None):
+async def gametora_data(session, category, *, manifest=None):
     if manifest is None:
         manifest = await gametora_manifest(session)
     version = manifest.get(category) if isinstance(manifest, dict) else None
@@ -140,9 +140,11 @@ async def gametora_catalog(session, category, *, manifest=None, list_key=None):
     url = f"https://gametora.com/data/umamusume/{category}.{version}.json"
     async with session.get(url) as response:
         response.raise_for_status()
-        cards = await response.json(content_type=None)
-    if list_key is not None and isinstance(cards, dict):
-        cards = cards.get(list_key)
+        return await response.json(content_type=None)
+
+
+async def gametora_catalog(session, category, *, manifest=None):
+    cards = await gametora_data(session, category, manifest=manifest)
     if not isinstance(cards, list):
         raise ValueError(f"Unexpected GameTora catalog format for {category}")
     return cards

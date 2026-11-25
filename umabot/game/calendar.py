@@ -16,6 +16,12 @@ EVENT_CATALOGS = {
     "en/gacha/char-standard": "Scout banners",
     "en/gacha/support-standard": "Support banners",
 }
+FORECAST_CATALOGS = {
+    "future_cm": CM_CATALOG,
+    "future_char_banners": "en/gacha/char-standard",
+    "future_support_banners": "en/gacha/support-standard",
+    "future_story_events": "en/storyevents",
+}
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,56 @@ def event_timestamp(value):
     if type(value) is not int or value <= 0:
         return 0
     return value // 1000 if value >= 100_000_000_000 else value
+
+
+def featured_title(ids, names):
+    featured = list(dict.fromkeys(
+        names[card_id] for card_id in ids if type(card_id) is int and names.get(card_id)
+    ))
+    title = ", ".join(featured[:3])
+    if len(featured) > 3:
+        title += f" +{len(featured) - 3}"
+    return title
+
+
+async def banner_card_names(get_catalog):
+    trainees, cards = await asyncio.gather(get_catalog("character-cards"), get_catalog("support-cards"))
+    return {
+        "en/gacha/char-standard": {row.get("card_id"): row.get("name_en") for row in trainees},
+        "en/gacha/support-standard": {row.get("support_id"): row.get("char_name") for row in cards},
+    }
+
+
+async def projected_events(timeline, get_catalog, confirmed, now):
+    """Build a separate EN preview from GameTora's Japanese-release-based estimates."""
+    known = {event.key.rsplit(":", 1)[0] for event in confirmed}
+    projections = {}
+    for key, source in FORECAST_CATALOGS.items():
+        rows = timeline.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict) or type(row.get("id")) is not int:
+                continue
+            identity = f"{source}:{row['id']}"
+            start = event_timestamp(row.get("display_start"))
+            if identity not in known and now < start <= now + 30 * 86400:
+                projections[identity] = (source, start, row)
+
+    sources = {source for source, _, _ in projections.values()}
+    banner_names = await banner_card_names(get_catalog) if sources & {"en/gacha/char-standard", "en/gacha/support-standard"} else {}
+    stories = await get_catalog("storyevents") if "en/storyevents" in sources else []
+    story_names = {row.get("event_id"): row.get("storyEventEn") or row.get("storyEventOriginal") for row in stories}
+    entries = []
+    for source, start, row in projections.values():
+        category = EVENT_CATALOGS[source]
+        title = row.get("name_en") or row.get("name")
+        if source in banner_names and isinstance(row.get("pickup_ids"), list):
+            title = featured_title(row["pickup_ids"], banner_names[source])
+        if source == "en/storyevents":
+            title = story_names.get(row["id"])
+        entries.append((start, category, title or f"#{row['id']}"))
+    return sorted(entries)
 
 
 async def game_events(get_catalog, now, *, ending_within=None):
@@ -53,24 +109,13 @@ async def game_events(get_catalog, now, *, ending_within=None):
 
     banner_names = {}
     if any(key.startswith("en/gacha/") for key, *_ in visible):
-        trainees, cards = await asyncio.gather(get_catalog("character-cards"), get_catalog("support-cards"))
-        banner_names = {
-            "en/gacha/char-standard": {row.get("card_id"): row.get("name_en") for row in trainees},
-            "en/gacha/support-standard": {row.get("support_id"): row.get("char_name") for row in cards},
-        }
+        banner_names = await banner_card_names(get_catalog)
 
     events = {}
     for key, category, title, event_id, start, end, row in visible:
         if key in banner_names:
-            names = banner_names[key]
-            featured = list(dict.fromkeys(
-                names[pickup[0]] for pickup in row.get("pickups", [])
-                if isinstance(pickup, list) and pickup and isinstance(pickup[0], int) and names.get(pickup[0])
-            ))
-            if featured:
-                title = ", ".join(featured[:3])
-                if len(featured) > 3:
-                    title += f" +{len(featured) - 3}"
+            pickups = (pickup[0] for pickup in row.get("pickups", []) if isinstance(pickup, list) and pickup)
+            title = featured_title(pickups, banner_names[key]) or title
         if not title:
             title = f"{category} #{event_id}" if event_id is not None else category
         identity = f"{key}:{event_id}:{start}"

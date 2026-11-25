@@ -6,8 +6,8 @@ from time import monotonic, time
 
 import aiohttp
 
-from .api import build_url, gametora_catalog, gametora_manifest, support_catalog_rows
-from .calendar import CM_FORECAST_CATALOG, game_events
+from .api import build_url, gametora_catalog, gametora_data, gametora_manifest, support_catalog_rows
+from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
 
 
 log = logging.getLogger(__name__)
@@ -76,8 +76,7 @@ class UmaFeeds:
                 rows = await response.json(content_type=None)
         else:
             manifest = await self.cached("GameTora manifest", self.load_manifest, {})
-            list_key = "future_cm" if endpoint == CM_FORECAST_CATALOG else None
-            rows = await gametora_catalog(self.http(), endpoint, manifest=manifest, list_key=list_key)
+            rows = await gametora_catalog(self.http(), endpoint, manifest=manifest)
         if not isinstance(rows, list):
             raise ValueError("Expected a list of records")
         if endpoint == "en/news/latest/20":
@@ -92,7 +91,23 @@ class UmaFeeds:
         return support_catalog_rows(rows) if endpoint == "gametora" else rows
 
     async def events(self):
+        if endpoint == CM_FORECAST_CATALOG:
+            rows = (await self.forecast_timeline(timeout=timeout)).get("future_cm")
+            return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
         return await self.cached("EN event calendar", self.load_events, [], ttl=60)
 
     async def load_events(self):
         return await game_events(self.catalog, int(time()))
+
+    async def load_forecast_timeline(self):
+        manifest = await self.cached("GameTora manifest", self.load_manifest, {})
+        timeline = await gametora_data(self.http(), CM_FORECAST_CATALOG, manifest=manifest)
+        if not isinstance(timeline, dict):
+            raise ValueError("Unexpected GameTora forecast timeline format")
+        return timeline
+
+    async def forecast_timeline(self, *, timeout=None):
+        return await self.cached("GameTora forecast timeline", self.load_forecast_timeline, {}, timeout=timeout)
+
+    async def projections(self, confirmed, now):
+        return await projected_events(await self.forecast_timeline(), self.catalog, confirmed, now)

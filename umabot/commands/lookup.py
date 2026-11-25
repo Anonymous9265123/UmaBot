@@ -413,7 +413,7 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     compare.autocomplete("first")(support_autocomplete)
     compare.autocomplete("second")(support_autocomplete)
 
-    register_community(group, alerts, get_catalog, feeds.events)
+    register_community(group, alerts, get_catalog, feeds.events, feeds.projections)
     if feedback is not None:
         register_feedback(group, feedback)
 

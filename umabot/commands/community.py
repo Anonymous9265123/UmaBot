@@ -11,7 +11,7 @@ from ..alerts import alert_channel
 from ..game.calendar import CM_CATALOG, CM_FORECAST_CATALOG, CM_REFERENCE_CATALOG, CM_URL
 
 
-def register_community(group, alerts, get_catalog, get_events):
+def register_community(group, alerts, get_catalog, get_events, get_projections):
     async def next_meeting_preview(meetings, now):
         forecasts, reference = await asyncio.gather(
             get_catalog(CM_FORECAST_CATALOG), get_catalog(CM_REFERENCE_CATALOG),
@@ -168,25 +168,40 @@ def register_community(group, alerts, get_catalog, get_events):
             (event for event in rows if now < event.start <= now + 30 * 86400),
             key=lambda event: (event.start, event.category, event.title),
         )
-        if not scheduled:
+        projections = await get_projections(rows, now)
+        if not scheduled and not projections:
             await interaction.edit_original_response(
-                content="UmaBot found no confirmed EN starts in the next 30 days in the GameTora data it received. "
-                "This list excludes forecasts. Use `/uma events` for active events and "
+                content="UmaBot found no confirmed or projected EN starts in the next 30 days in the GameTora data it received. "
+                "Use `/uma events` for active events and "
                 "`/uma cm` for Champions Meeting details or a preview when available.",
             )
             return
 
-        lines = [
-            f"<t:{event.start}:f> · **{event.category}** · {discord.utils.escape_markdown(event.title[:110])}"
+        confirmed_lines = [
+            f"<t:{event.start}:f> · **{event.category}** · {discord.utils.escape_markdown(event.title)[:110]}"
             for event in scheduled[:12]
         ]
+        description = "**Confirmed EN starts**\n" + ("\n".join(confirmed_lines) or "None listed.")
+        if projections:
+            forecast_lines = [
+                f"<t:{start}:D> · **{category}** · {discord.utils.escape_markdown(title)[:95]}"
+                for start, category, title in projections[:8]
+            ]
+            description += (
+                "\n\n**Unconfirmed EN forecasts**\n"
+                "GameTora uses the Japanese release schedule to estimate EN dates. Dates and lineups may change.\n"
+                + "\n".join(forecast_lines)
+            )
         embed = discord.Embed(
             title="Upcoming EN schedule · Next 30 days",
             url="https://gametora.com/umamusume/events",
-            description="\n".join(lines),
+            description=description,
             color=0x58A65C,
         )
-        embed.set_footer(text=f"GameTora · Showing {len(lines)} of {len(scheduled)} confirmed entries · Dates may change")
+        embed.set_footer(text=(
+            f"GameTora · {len(confirmed_lines)} of {len(scheduled)} confirmed"
+            f" · {min(8, len(projections))} of {len(projections)} projected · Dates may change"
+        ))
         await interaction.edit_original_response(embed=embed)
 
     if alerts is None:
