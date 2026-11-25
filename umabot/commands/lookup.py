@@ -8,7 +8,7 @@ import aiohttp
 import discord
 from discord import app_commands
 
-from ..alerts import AlertPreferences, PostingDestination
+from ..alert_settings import AlertPreferences, PostingDestination
 from ..game.api import (
     birthday_image,
     build_url,
@@ -25,7 +25,7 @@ from ..embeds import (
     skill_embed,
     support_embed,
 )
-from ..game.support_stats import BASE_LEVELS
+from ..game.support_stats import has_support_stats, load_support_stats
 from ..stats import StatsButton, SupportComparisonView
 from .community import register_community
 from .feedback import register_feedback
@@ -200,6 +200,14 @@ def name_matches(records, query, support=False, *, alias_fields=()):
     return sorted(ranked)
 
 
+def resolve_support_id(records, query):
+    query = query.strip()
+    if query.isascii() and query.isdecimal():
+        return int(query)
+    matches = name_matches(records, query, support=True) if normalize_name(query) else []
+    return matches[0][2] if matches else None
+
+
 def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     group = app_commands.Group(
         name="uma",
@@ -321,16 +329,15 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         name = name.strip()
         await interaction.response.defer(thinking=True)
         details = await get_catalog("gametora")
-        if name.isascii() and name.isdecimal():
-            card_id = int(name)
-        else:
-            cards = details or await get_catalog("support")
-            matches = name_matches(cards, name, support=True) if normalize_name(name) else []
-            if not matches:
-                message = "No matching support card found." if cards else "The support card list is temporarily unavailable."
-                await interaction.edit_original_response(content=message)
-                return
-            card_id = matches[0][2]
+        cards = details
+        card_id = resolve_support_id(cards, name)
+        if card_id is None and not cards:
+            cards = await get_catalog("support")
+            card_id = resolve_support_id(cards, name)
+        if card_id is None:
+            message = "No matching support card found." if cards else "The support card list is temporarily unavailable."
+            await interaction.edit_original_response(content=message)
+            return
         metadata = next((card for card in details if card["id"] == card_id), {})
         await lookup(
             interaction, f"support/{card_id}", "Support card details",
@@ -383,10 +390,8 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         second_lb: int = 4,
     ):
         await interaction.response.defer(thinking=True)
-        raw_cards, effects = await asyncio.gather(
-            feeds.catalog("support-cards"), feeds.catalog("support_effects"),
-        )
-        if not raw_cards or not effects:
+        raw_cards, definitions = await load_support_stats(feeds)
+        if not raw_cards or definitions is None:
             await interaction.edit_original_response(content="Support card stats are temporarily unavailable.")
             return
 
@@ -394,22 +399,15 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         cards_by_id = {card["id"]: card for card in records}
         selected = []
         for position, query in (("first", first), ("second", second)):
-            query = query.strip()
-            if query.isascii() and query.isdecimal():
-                card_id = int(query)
-            else:
-                matches = name_matches(records, query, support=True) if normalize_name(query) else []
-                card_id = matches[0][2] if matches else None
-            card = cards_by_id.get(card_id)
+            card = cards_by_id.get(resolve_support_id(records, query))
             if card is None:
                 await interaction.edit_original_response(content=f"No match for the {position} support card. Try a card name or ID.")
                 return
-            if card.get("rarity") not in BASE_LEVELS or not card.get("effects"):
+            if not has_support_stats(card):
                 await interaction.edit_original_response(content=f"Stats are unavailable for the {position} support card.")
                 return
             selected.append(card)
 
-        definitions = {effect["id"]: effect for effect in effects if "id" in effect}
         view = SupportComparisonView(selected, (first_lb, second_lb), definitions, interaction.user.id)
         await interaction.edit_original_response(embed=view.effects_embed(), view=view)
 

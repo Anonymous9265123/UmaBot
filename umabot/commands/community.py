@@ -7,7 +7,7 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 
-from ..alerts import alert_channel, parse_alert_time
+from ..alert_settings import alert_channel, parse_alert_time
 from ..game.calendar import BANNER_CATALOGS, CM_CATALOG, CM_FORECAST_CATALOG, CM_REFERENCE_CATALOG, CM_URL
 
 

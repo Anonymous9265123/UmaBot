@@ -85,4 +85,6 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 
 ## Contributing
 
+Run `python -m unittest discover -s tests` from your virtual environment. The same regression tests run on Ubuntu and Windows in GitHub Actions.
+
 Test changes in a Discord server you control using your own bot application. Start UmaBot with `python -m umabot` from your virtual environment, run the commands affected by your change, and verify any affected buttons or scheduled messages. In your pull request, describe what changed, what you tested, and any known limitations. Keep Discord tokens, local databases, and caches out of commits.

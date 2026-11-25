@@ -1,8 +1,24 @@
 """Resolve support effects at each rarity's limit-break level cap."""
 
+import asyncio
+
 
 BASE_LEVELS = {1: 20, 2: 25, 3: 30}
 EFFECT_LEVELS = (1, *range(5, 51, 5))
+
+
+async def load_support_stats(feeds):
+    cards, effects = await asyncio.gather(feeds.catalog("support-cards"), feeds.catalog("support_effects"))
+    definitions = {effect["id"]: effect for effect in effects if "id" in effect}
+    return cards, definitions if effects else None
+
+
+def has_support_stats(card):
+    return card is not None and card.get("rarity") in BASE_LEVELS and bool(card.get("effects"))
+
+
+def support_level(card, limit_break):
+    return BASE_LEVELS[card["rarity"]] + limit_break * 5
 
 
 def effect_at_level(values, level):
@@ -29,12 +45,21 @@ def format_effect(effect, value):
     return str(value)
 
 
+def support_effect_name(effect_id, definition):
+    return definition.get("name_en") or definition.get("name_en_eon") or f"Effect #{effect_id}"
+
+
+def support_effect_values(card, level):
+    for effect_id, *points in card["effects"]:
+        value, unlock = effect_at_level(points, level)
+        yield effect_id, value, unlock
+
+
 def support_effects(card, level, definitions):
     active, locked = [], []
-    for effect_id, *values in card["effects"]:
+    for effect_id, value, unlock in support_effect_values(card, level):
         effect = definitions.get(effect_id, {})
-        name = effect.get("name_en") or effect.get("name_en_eon") or f"Effect #{effect_id}"
-        value, unlock = effect_at_level(values, level)
+        name = support_effect_name(effect_id, effect)
         if value is not None:
             active.append(f"{name} · {format_effect(effect, value)}")
         elif unlock is not None:

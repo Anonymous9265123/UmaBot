@@ -1,12 +1,20 @@
 """Show support card stats by limit break in Discord."""
 
-import asyncio
 from urllib.parse import quote
 
 import discord
 
 from .game.api import build_url
-from .game.support_stats import BASE_LEVELS, effect_at_level, format_effect, support_effects, unique_effects
+from .game.support_stats import (
+    format_effect,
+    has_support_stats,
+    load_support_stats,
+    support_effect_name,
+    support_effect_values,
+    support_effects,
+    support_level,
+    unique_effects,
+)
 
 
 def support_card_url(card):
@@ -19,7 +27,7 @@ def support_comparison(cards, limit_breaks, definitions):
     """Show the active and unique effects at each selected level cap."""
     embed = discord.Embed(title="Support card comparison", color=0x58A65C)
     for card, limit_break in zip(cards, limit_breaks, strict=True):
-        level = BASE_LEVELS[card["rarity"]] + limit_break * 5
+        level = support_level(card, limit_break)
         name = card.get("name_en_gl") or card.get("char_name") or "Support card"
         title = card.get("title_en") or card.get("title_ja")
         rarity = {1: "R", 2: "SR", 3: "SSR"}[card["rarity"]]
@@ -59,15 +67,12 @@ class SupportComparisonView(discord.ui.View):
         headings = []
         values = []
         for label, card, limit_break in zip(("A", "B"), self.cards, self.limit_breaks, strict=True):
-            level = BASE_LEVELS[card["rarity"]] + limit_break * 5
+            level = support_level(card, limit_break)
             name = card.get("name_en_gl") or card.get("char_name") or "Support card"
             title = card.get("title_en") or card.get("title_ja")
             name = discord.utils.escape_markdown(f"{name} · {title}" if title else name)[:130]
             headings.append(f"**{label}** {name} · {limit_break}LB · Lv {level}")
-            values.append({
-                effect_id: effect_at_level(points, level)[0]
-                for effect_id, *points in card["effects"]
-            })
+            values.append({effect_id: value for effect_id, value, _ in support_effect_values(card, level)})
         left, right = values
         shared, exclusive = [], []
         for effect_id in dict.fromkeys((*left, *right)):
@@ -75,7 +80,7 @@ class SupportComparisonView(discord.ui.View):
             if first is None and second is None:
                 continue
             effect = self.definitions.get(effect_id, {})
-            name = effect.get("name_en") or effect.get("name_en_eon") or f"Effect #{effect_id}"
+            name = support_effect_name(effect_id, effect)
             display_name = discord.utils.escape_markdown(name)[:100]
             a = "—" if first is None else format_effect(effect, first)
             b = "—" if second is None else format_effect(effect, second)
@@ -119,15 +124,14 @@ class SupportStatsView(discord.ui.View):
         super().__init__(timeout=180)
         self.card = card
         self.definitions = definitions
-        self.base = BASE_LEVELS[card["rarity"]]
         self.url = support_card_url(card)
         self.limit_break.options = [
-            discord.SelectOption(label=f"{index}LB · Lv {self.base + index * 5}", value=str(index), default=index == 4)
+            discord.SelectOption(label=f"{index}LB · Lv {support_level(card, index)}", value=str(index), default=index == 4)
             for index in range(5)
         ]
 
     def embed(self, limit_break):
-        level = self.base + limit_break * 5
+        level = support_level(self.card, limit_break)
         name = self.card.get("name_en_gl") or self.card.get("char_name") or "Support card"
         title = self.card.get("title_en") or self.card.get("title_ja")
         rarity = {1: "R", 2: "SR", 3: "SSR"}[self.card["rarity"]]
@@ -172,13 +176,13 @@ class StatsButton(
     async def callback(self, interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         feeds = interaction.client.feeds
-        cards, effects = await asyncio.gather(feeds.catalog("support-cards"), feeds.catalog("support_effects"))
+        cards, definitions = await load_support_stats(feeds)
         card = next((card for card in cards if card.get("support_id") == self.card_id), None)
-        if not effects or not card or card.get("rarity") not in BASE_LEVELS or not card.get("effects"):
+        if definitions is None or not has_support_stats(card):
             url = build_url(f"support/{self.card_id}/gametora")
             await interaction.edit_original_response(
                 content=f"Support stats are unavailable right now. [Open the card on GameTora]({url}).",
             )
             return
-        view = SupportStatsView(card, {effect["id"]: effect for effect in effects if "id" in effect})
+        view = SupportStatsView(card, definitions)
         await interaction.edit_original_response(embed=view.embed(4), view=view)
