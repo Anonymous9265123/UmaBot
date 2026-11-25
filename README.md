@@ -8,7 +8,7 @@ UmaBot was built with help from ChatGPT and may contain mistakes. When opening a
 
 ## Latest update
 
-UmaBot now prepares search data for support cards, characters, racetracks, shared skills, and unique skills in the background after connecting to Discord. Commands and autocomplete reuse that data as it becomes ready.
+Use `/uma borrow find` to open uma.moe’s Global trainer listings for an exact EN-released support card. Choose the card from autocomplete or enter its numeric ID. The search includes every limit break by default, and you can set a higher minimum.
 
 ## Run your own UmaBot
 
