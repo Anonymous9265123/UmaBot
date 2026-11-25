@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 
 from umabot.alerts import UmaAlerts
+from umabot.commands.lookup import lookup
 from umabot.game.api import build_url
 from umabot.game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL, UmaFeeds
 from umabot.game.upstream import HostBudget, UMAPYOI_LIMITS, UpstreamCooldown
@@ -55,6 +56,18 @@ class MockSession:
         yield self.actions[url].popleft()
 
 
+class BlockingResponse(MockResponse):
+    def __init__(self, data):
+        super().__init__(data)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def json(self, **kwargs):
+        self.entered.set()
+        await self.release.wait()
+        return self.data
+
+
 class UpstreamTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.now = 100.0
@@ -78,6 +91,93 @@ class UpstreamTests(unittest.IsolatedAsyncioTestCase):
         self.now += 1
         self.assertEqual(await self.feeds.catalog(NEWS_ENDPOINT), [{"id": 2}])
         self.assertEqual(self.session.calls[NEWS], 2)
+
+    async def test_birthdays_never_use_previous_day_during_cooldown(self):
+        endpoint = "character/currentbirthdays"
+        url = build_url(endpoint)
+        self.session.add(
+            url,
+            MockResponse({"birthdays": [{"name_en": "Previous Day", "birth_month": 1, "birth_day": 16}]}),
+            MockResponse(status=429, headers={"Retry-After": "120"}),
+        )
+        reply = AsyncMock()
+        interaction = SimpleNamespace(
+            client=SimpleNamespace(feeds=self.feeds),
+            response=SimpleNamespace(is_done=lambda: True),
+            edit_original_response=reply,
+        )
+        await lookup(interaction, endpoint, "Birthdays", birthdays=True)
+        self.assertEqual(reply.await_args.kwargs["embeds"][0].title, "Today's birthdays")
+        self.assertIn("Previous Day", reply.await_args.kwargs["embeds"][0].description)
+
+        self.now += 86400
+        await lookup(interaction, endpoint, "Birthdays", birthdays=True)
+        self.assertEqual(reply.await_args.kwargs, {"content": "Too many requests. Try again later."})
+        await lookup(interaction, endpoint, "Birthdays", birthdays=True)
+        self.assertEqual(reply.await_args.kwargs, {"content": "Too many requests. Try again later."})
+        self.assertEqual(self.session.calls[url], 2)
+
+    async def test_overlapping_direct_lookups_share_one_request_and_later_lookup_is_fresh(self):
+        url = build_url("character/1")
+        self.session.add(url, MockResponse({"id": 1}), MockResponse({"id": 2}))
+        results = await asyncio.gather(self.feeds.record(url), self.feeds.record(url))
+        self.assertEqual(results, [(200, {"id": 1}), (200, {"id": 1})])
+        self.assertEqual(self.session.calls[url], 1)
+        self.assertEqual(await self.feeds.record(url), (200, {"id": 2}))
+        self.assertEqual(self.session.calls[url], 2)
+
+    async def test_cancelling_one_direct_caller_leaves_the_other_waiting(self):
+        url = build_url("support/1")
+        response = BlockingResponse({"id": 1})
+        self.session.add(url, response)
+        first = asyncio.create_task(self.feeds.record(url))
+        second = asyncio.create_task(self.feeds.record(url))
+        try:
+            await asyncio.wait_for(response.entered.wait(), timeout=1)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            self.assertFalse(second.done())
+        finally:
+            response.release.set()
+        self.assertEqual(await asyncio.wait_for(second, timeout=1), (200, {"id": 1}))
+        self.assertEqual(self.session.calls[url], 1)
+
+    async def test_new_direct_caller_does_not_join_pending_request_during_cooldown(self):
+        url = build_url("support/1")
+        response = BlockingResponse({"id": 1})
+        limited = build_url("character/1")
+        self.session.add(url, response)
+        self.session.add(limited, MockResponse(status=429, headers={"Retry-After": "120"}))
+        pending = asyncio.create_task(self.feeds.record(url))
+        try:
+            await asyncio.wait_for(response.entered.wait(), timeout=1)
+            self.assertEqual(await self.feeds.record(limited), (429, None))
+            self.assertEqual(await asyncio.wait_for(self.feeds.record(url), timeout=1), (429, None))
+        finally:
+            response.release.set()
+            await pending
+        self.assertEqual(self.session.calls[url], 1)
+
+    async def test_failed_shared_direct_lookup_can_be_retried(self):
+        url = build_url("character/1")
+        self.session.add(url, MockResponse(status=502), MockResponse({"id": 1}))
+        results = await asyncio.gather(self.feeds.record(url), self.feeds.record(url), return_exceptions=True)
+        self.assertTrue(all(isinstance(result, aiohttp.ClientError) for result in results))
+        self.assertEqual(self.session.calls[url], 1)
+        self.assertEqual(await self.feeds.record(url), (200, {"id": 1}))
+        self.assertEqual(self.session.calls[url], 2)
+
+    async def test_different_direct_timeouts_or_redirect_settings_do_not_share_requests(self):
+        url = build_url("support/1")
+        self.session.add(url, *(MockResponse({"request": index}) for index in range(3)))
+        results = await asyncio.gather(
+            self.feeds.record(url),
+            self.feeds.record(url, timeout=5),
+            self.feeds.record(url, allow_redirects=True),
+        )
+        self.assertEqual(results, [(200, {"request": index}) for index in range(3)])
+        self.assertEqual(self.session.calls[url], 3)
 
     async def test_catalog_reuses_version_and_keeps_old_data_until_replacement_succeeds(self):
         self.session.add(MANIFEST, MockResponse({"skills": "aa"}), MockResponse({"skills": "aa"}), MockResponse({"skills": "bb"}))
@@ -140,24 +240,17 @@ class UpstreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.feeds.http().hosts["umapyoi.net"].until, self.now + 60)
 
     async def test_cooldown_does_not_wait_for_a_request_already_in_flight(self):
-        entered, release = asyncio.Event(), asyncio.Event()
-
-        class SlowResponse(MockResponse):
-            async def json(self, **kwargs):
-                entered.set()
-                await release.wait()
-                return [{"id": 1}]
-
-        self.session.add(NEWS, SlowResponse())
+        response = BlockingResponse([{"id": 1}])
+        self.session.add(NEWS, response)
         record = build_url("character/1")
         self.session.add(record, MockResponse(status=429, headers={"Retry-After": "120"}))
         pending = asyncio.create_task(self.feeds.catalog(NEWS_ENDPOINT))
         try:
-            await asyncio.wait_for(entered.wait(), timeout=1)
+            await asyncio.wait_for(response.entered.wait(), timeout=1)
             self.assertEqual(await self.feeds.record(record), (429, None))
             self.assertEqual(await asyncio.wait_for(self.feeds.catalog(NEWS_ENDPOINT), timeout=0.5), [])
         finally:
-            release.set()
+            response.release.set()
             await pending
         self.assertEqual(self.session.calls[NEWS], 1)
 

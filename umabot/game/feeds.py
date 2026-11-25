@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import OrderedDict
 from time import monotonic, time
+from urllib.parse import urlsplit
 
 import aiohttp
 
@@ -21,6 +22,7 @@ NEWS_TTL = 15 * 60
 NEWS_ENDPOINT = "en/news/latest/20"
 UMAPYOI_CATALOGS = {"character/list", "support", NEWS_ENDPOINT}
 RETRY_DELAY = 60
+CURRENT_BIRTHDAYS_URL = build_url("character/currentbirthdays")
 
 
 class UmaFeeds:
@@ -34,6 +36,7 @@ class UmaFeeds:
         self.catalog_versions = {}
         self.catalog_attempts = {}
         self.records = OrderedDict()
+        self.record_requests = {}
         self.session = None
         self.transport = None
         self.closed = False
@@ -46,21 +49,45 @@ class UmaFeeds:
         return self.transport
 
     async def record(self, url, *, timeout=30, allow_redirects=False):
+        request_key = (url, allow_redirects, timeout)
+        task = self.record_requests.get(request_key)
+        if task is None or task.done():
+            task = asyncio.create_task(self.load_record(url, timeout=timeout, allow_redirects=allow_redirects))
+            self.record_requests[request_key] = task
+            task.add_done_callback(lambda finished: self.finish_record(request_key, finished))
+        elif self.transport and self.transport.cooling_down(urlsplit(url).hostname):
+            return self.stale_record(url, allow_redirects)
+        return await asyncio.shield(task)
+
+    def finish_record(self, request_key, task):
+        if self.record_requests.get(request_key) is task:
+            del self.record_requests[request_key]
+        if not task.cancelled():
+            # A request may fail after all of its callers have cancelled.
+            task.exception()
+
+    async def load_record(self, url, *, timeout, allow_redirects):
         key = (url, allow_redirects)
+        cacheable = url.partition("?")[0] != CURRENT_BIRTHDAYS_URL
         try:
             status, data = await fetch_record(self.http(), url, timeout=timeout, allow_redirects=allow_redirects)
         except UpstreamCooldown:
-            return self.records.get(key, (429, None))
-        if 200 <= status < 300:
+            return self.stale_record(url, allow_redirects)
+        if cacheable and 200 <= status < 300:
             self.records[key] = (status, data)
             self.records.move_to_end(key)
             if len(self.records) > 256:
                 self.records.popitem(last=False)
         return status, data
 
+    def stale_record(self, url, allow_redirects):
+        if url.partition("?")[0] == CURRENT_BIRTHDAYS_URL:
+            return 429, None
+        return self.records.get((url, allow_redirects), (429, None))
+
     async def close(self):
         self.closed = True
-        tasks = tuple(self.refreshes.values())
+        tasks = (*self.refreshes.values(), *self.record_requests.values())
         for task in tasks:
             task.cancel()
         if tasks:
