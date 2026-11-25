@@ -2,13 +2,13 @@
 
 UmaBot provides Umamusume lookups, support card stats, news, and release alerts in Discord.
 
-UmaBot is an open-source community project. Everyone is welcome to fork the repository, modify the bot, and open pull requests with fixes, features, or documentation improvements.
+UmaBot is an open-source community project. Everyone is welcome to fork the repository, modify the bot, and open pull requests with fixes, features, or documentation improvements. [MIT License](LICENSE)
 
 UmaBot was built with help from ChatGPT and may contain mistakes. When opening a pull request, please keep this in mind, verify the behavior you’re changing, and describe any issues you found and how you tested your changes.
 
 ## Run your own UmaBot
 
-You need Python 3.11 or newer and a Discord server where you can install apps. Python 3.13 is tested in CI.
+You need Python 3.11 or newer and a Discord server where you can install apps. CI covers Python 3.11 on Ubuntu and Python 3.13 on Ubuntu and Windows.
 
 1. **Get the code.** Use **Code → Download ZIP** and extract it, or run `git clone https://github.com/Anonymous9265123/UmaBot.git`. If you're contributing or want your own copy on GitHub, fork the repo first and clone your fork.
 2. **Create a Discord application.** Select **New Application**, open the **Bot** page, and generate or copy the **bot token**. Keep it private. [Discord Developer Portal](https://discord.com/developers/applications)
@@ -67,13 +67,18 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 
 ## Events and reminders
 
-UmaBot checks Umapyoi EN news every 15 minutes and checks support card and trainee releases hourly.
-
 - `/uma cm` shows the active EN Champions Meeting or the next one. When the EN schedule runs out, it shows a labeled GameTora preview. Search by name to look up a past cup.
 - `/uma events` shows active and upcoming EN events, limited missions, and standard banners from GameTora.
 - Use `/uma digest channel:#uma-news day:Monday delivery_time:09:00` to post a weekly summary of confirmed starts and deadlines for the next seven days. GameTora forecasts appear separately and may change. Delivery uses the bot host's local time and sends no mentions. Run `/uma digest enabled:False` to turn it off.
 - Use `/uma alert` to choose a daily delivery time on the computer running UmaBot or receive alerts as soon as they qualify. Enter a custom time such as `5:30 PM` and choose how soon before an event ends to get a reminder, from 1 to 168 hours. Existing schedules keep the same clock time and follow the bot host's time zone. A scheduled reminder is sent only if the event qualifies at the chosen time, and only once per event.
 - Use `/uma reminders` to turn event deadline pings on or off. The default window is 24 hours. Server managers can use `/uma news` or `/uma setup` to select the shared posting channel.
+
+## Data sources
+
+- Umapyoi supplies EN news, character profiles and birthdays, related outfits and support cards, and support card details. [Umapyoi API](https://umapyoi.net/docs/)
+- GameTora supplies skill and racetrack catalogs, card stats and release data, and EN schedules for events, missions, and banners, including separate forecasts. [GameTora](https://gametora.com/umamusume)
+
+With a posting channel configured, background checks run every 15 minutes for Umapyoi EN news and hourly for card and trainee releases. GameTora’s manifest is cached for an hour, and UmaBot downloads catalog data only when it needs a version it has not cached. Slash commands can look up records on demand and reuse cached catalog data.
 
 ## Troubleshooting
 
@@ -87,6 +92,28 @@ UmaBot checks Umapyoi EN news every 15 minutes and checks support card and train
 
 ## Contributing
 
-Run `python -m unittest discover -s tests` from your virtual environment. The same regression tests run on Ubuntu and Windows in GitHub Actions.
+From the repository root, run the installer to create `.venv`, then install Ruff into that same environment. The checks below also run in GitHub Actions and require no Discord token.
+
+**Windows PowerShell**
+
+```powershell
+python setup_umabot.py --install-only
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -c "from umabot.bot import main"
+.\.venv\Scripts\python.exe -m unittest discover -s tests
+```
+
+**macOS or Linux**
+
+```sh
+python3 setup_umabot.py --install-only
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pip check
+.venv/bin/python -m ruff check .
+.venv/bin/python -c "from umabot.bot import main"
+.venv/bin/python -m unittest discover -s tests
+```
 
 Test changes in a Discord server you control using your own bot application. Start UmaBot with `python -m umabot` from your virtual environment, run the commands affected by your change, and verify any affected buttons or scheduled messages. In your pull request, describe what changed, what you tested, and any known limitations. Keep Discord tokens, local databases, and caches out of commits.
