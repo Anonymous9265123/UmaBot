@@ -2,6 +2,8 @@
 
 UmaBot provides Umamusume lookups, support card stats, news, and release alerts in Discord.
 
+UmaBot is an open-source community project. Everyone is welcome to fork the repository, modify the bot, and open pull requests with fixes, features, or documentation improvements.
+
 UmaBot was built with help from ChatGPT and may contain mistakes. When opening a pull request, please keep this in mind, verify the behavior you’re changing, and describe any issues you found and how you tested your changes.
 
 ## Set up your fork
