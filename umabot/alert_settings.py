@@ -248,6 +248,11 @@ class PostingDestination(discord.ui.View):
         await interaction.response.send_message("You need Manage Server to configure UmaBot posts.", ephemeral=True)
         return False
 
+    @staticmethod
+    def can_send_embed(channel, member):
+        permissions = channel.permissions_for(member)
+        return permissions.view_channel and permissions.send_messages and permissions.embed_links
+
     @discord.ui.select(
         cls=discord.ui.ChannelSelect,
         placeholder="Choose a text channel",
@@ -258,19 +263,49 @@ class PostingDestination(discord.ui.View):
         if channel is None or not channel.permissions_for(interaction.user).view_channel:
             await interaction.response.send_message("Choose a channel you can access.", ephemeral=True)
             return
-        permissions = channel.permissions_for(interaction.guild.me)
-        if not (permissions.view_channel and permissions.send_messages and permissions.embed_links):
+        if not self.can_send_embed(channel, interaction.guild.me):
             await interaction.response.send_message(
                 "Choose a channel where UmaBot can view the channel, send messages, and embed links.",
                 ephemeral=True,
             )
             return
         self.alerts.set_posting_channel(channel.id)
+        self.disable.disabled = False
         await interaction.response.edit_message(
             content=f"I’ll post updates and subscription pings in {channel.mention}. I check EN news every 15 minutes and card and trainee releases hourly.",
-            view=None,
+            view=self,
         )
-        self.stop()
+
+    @discord.ui.button(label="Send test post", style=discord.ButtonStyle.primary)
+    async def test_post(self, interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        setting = self.alerts.posting_setting()
+        if setting is None:
+            await interaction.edit_original_response(content="Select and save a posting channel first.")
+            return
+
+        channel = interaction.guild.get_channel(setting[0])
+        missing_channel = "The saved channel is no longer available. Select and save another posting channel."
+        permission_error = "Check that UmaBot has View Channel, Send Messages, and Embed Links permissions in the saved channel."
+        if channel is None:
+            await interaction.edit_original_response(content=missing_channel)
+            return
+        if not self.can_send_embed(channel, interaction.guild.me):
+            await interaction.edit_original_response(content=permission_error)
+            return
+
+        embed = discord.Embed(
+            title="UmaBot test alert",
+            description="This post was sent manually to verify alert delivery.",
+        )
+        try:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.NotFound:
+            await interaction.edit_original_response(content=missing_channel)
+        except discord.HTTPException:
+            await interaction.edit_original_response(content=f"Couldn't send the test post. {permission_error}")
+        else:
+            await interaction.edit_original_response(content=f"UmaBot successfully posted an embed in {channel.mention}.")
 
     @discord.ui.button(label="Turn off UmaBot posts")
     async def disable(self, interaction, button):

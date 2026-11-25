@@ -22,6 +22,8 @@ You need Python 3.11 or newer and a Discord server where you can install apps. C
 
 The script creates `.venv`, installs dependencies, and starts the bot. Paste the bot token when prompted. The terminal hides your input. In Discord, run `/uma help` to confirm the bot is ready. For automated posts and pings, have someone with **Manage Server** run `/uma setup` and choose a text channel.
 
+After saving the channel, select **Send test post** to verify UmaBot can send an embed there.
+
 ### Start again or run on a host
 
 Keep the bot process running to receive commands and send alerts. Run the same setup command after pulling changes to install any updated dependencies. Add `--install-only` to prepare the environment without connecting to Discord.
