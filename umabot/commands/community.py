@@ -169,7 +169,11 @@ def register_community(group, alerts, get_catalog, get_events):
             key=lambda event: (event.start, event.category, event.title),
         )
         if not scheduled:
-            await interaction.edit_original_response(content="No upcoming EN schedule entries are available for the next 30 days.")
+            await interaction.edit_original_response(
+                content="UmaBot found no confirmed EN starts in the next 30 days in the GameTora data it received. "
+                "This list excludes forecasts. Use `/uma events` for active events and "
+                "`/uma cm` for Champions Meeting details or a preview when available.",
+            )
             return
 
         lines = [
@@ -182,7 +186,7 @@ def register_community(group, alerts, get_catalog, get_events):
             description="\n".join(lines),
             color=0x58A65C,
         )
-        embed.set_footer(text=f"GameTora · Showing {len(lines)} of {len(scheduled)} entries")
+        embed.set_footer(text=f"GameTora · Showing {len(lines)} of {len(scheduled)} confirmed entries · Dates may change")
         await interaction.edit_original_response(embed=embed)
 
     if alerts is None:
