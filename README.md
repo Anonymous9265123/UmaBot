@@ -2,6 +2,8 @@
 
 UmaBot provides Umamusume lookups, support card stats, news, and release alerts in Discord.
 
+UmaBot was built with help from ChatGPT and may contain mistakes. When opening a pull request, please keep this in mind, verify the behavior you’re changing, and describe any issues you found and how you tested your changes.
+
 ## Set up your fork
 
 1. Create your own Discord application and get its bot token. Install the app in your server with the `bot` and `applications.commands` scopes. Give it permission to view its posting channel, send messages, embed links, and attach files. [Discord Developer Portal](https://discord.com/developers/applications)
