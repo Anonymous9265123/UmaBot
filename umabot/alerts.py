@@ -15,7 +15,6 @@ from discord.ext import tasks
 
 from .alert_settings import AlertButton
 from .embeds import news_embeds, weekly_digest_embed
-from .game.api import build_url, en_release_date, en_release_status, support_name
 from .game.feeds import FEED_TTL
 
 
@@ -366,57 +365,16 @@ class UmaAlerts:
         await self.client.wait_until_ready()
 
     async def check_cards(self, setting):
-        catalog = await self.feeds.catalog("gametora")
-        released = {}
-        announcements = []
-        for card in catalog:
-            date = en_release_date(card)
-            if date is None or date.timestamp() > time():
-                continue
-            topic = str(card["id"])
-            name = support_name(card) or "Support card"
-            link = build_url(f"support/{topic}/gametora")
-            message = f"**{discord.utils.escape_markdown(name)[:200]}** is available on EN. <{link}>"
-            released[topic] = message
-            announcements.append((date.timestamp(), f"support:{topic}", {"content": f"New EN support card\n{message}"}))
-        self.released_cards = released
+        self.released_cards, announcements = await self.feeds.support_releases()
         await self.post_updates(announcements, setting)
 
     async def trainee_status(self, topic):
-        catalog = await self.trainee_releases()
-        return catalog.get(topic, ("Unknown", None, None))[0]
-
-    async def trainee_releases(self):
-        catalog = await self.feeds.catalog("character-cards")
-        trainees = {}
-        priority = {"Unreleased": 0, "Unknown": 1, "Released": 2}
-        for card in catalog:
-            if not isinstance(card.get("char_id"), int):
-                continue
-            topic = f"trainee:{card['char_id']}"
-            status = en_release_status(card)
-            date = en_release_date(card)
-            previous = trainees.get(topic)
-            if (
-                previous is None
-                or priority[status] > priority[previous[0]]
-                or (status == previous[0] and date is not None and (previous[2] is None or date < previous[2]))
-            ):
-                name = card.get("name_en") or card.get("name_jp") or "Your trainee"
-                trainees[topic] = (status, name, date)
-        return trainees
+        statuses, _, _ = await self.feeds.trainee_releases()
+        return statuses.get(topic, "Unknown")
 
     async def check_trainees(self, setting):
-        catalog = await self.trainee_releases()
-        self.released_trainees = {
-            topic: f"**{discord.utils.escape_markdown(name)[:200]}** is now playable on EN."
-            for topic, (status, name, _) in catalog.items()
-            if status == "Released"
-        }
-        await self.post_updates([
-            (catalog[topic][2].timestamp(), topic, {"content": f"New EN character\n{message}"})
-            for topic, message in self.released_trainees.items()
-        ], setting)
+        _, self.released_trainees, announcements = await self.feeds.trainee_releases()
+        await self.post_updates(announcements, setting)
 
     async def notify_releases(self, subscriptions, messages):
         by_topic = defaultdict(list)

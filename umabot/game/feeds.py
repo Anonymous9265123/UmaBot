@@ -6,6 +6,7 @@ from time import monotonic, time
 
 import aiohttp
 
+from ..releases import support_releases, trainee_releases
 from .api import build_url, gametora_catalog, gametora_data, gametora_manifest, support_catalog_rows
 from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
 
@@ -19,6 +20,7 @@ class UmaFeeds:
     def __init__(self):
         self.values = {}
         self.refreshes = {}
+        self.release_snapshots = {}
         self.session = None
         self.closed = False
 
@@ -86,15 +88,31 @@ class UmaFeeds:
         return rows
 
     async def catalog(self, endpoint, *, timeout=None):
+        if endpoint == CM_FORECAST_CATALOG:
+            rows = (await self.forecast_timeline(timeout=timeout)).get("future_cm")
+            return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
         source = "support-cards" if endpoint == "gametora" else endpoint
         rows = await self.cached(source, lambda: self.load_catalog(source), [], timeout=timeout)
         return support_catalog_rows(rows) if endpoint == "gametora" else rows
 
     async def events(self):
-        if endpoint == CM_FORECAST_CATALOG:
-            rows = (await self.forecast_timeline(timeout=timeout)).get("future_cm")
-            return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
         return await self.cached("EN event calendar", self.load_events, [], ttl=60)
+
+    async def release_snapshot(self, endpoint, build):
+        """Reuse processed releases until the source changes or the next release goes live."""
+        records = await self.catalog(endpoint)
+        now = time()
+        previous, built_at, next_release, result = self.release_snapshots.get(endpoint, (None, 0, 0, None))
+        if records is not previous or not built_at <= now < next_release:
+            result, next_release = build(records, now)
+            self.release_snapshots[endpoint] = (records, now, next_release, result)
+        return result
+
+    async def support_releases(self):
+        return await self.release_snapshot("support-cards", support_releases)
+
+    async def trainee_releases(self):
+        return await self.release_snapshot("character-cards", trainee_releases)
 
     async def load_events(self):
         return await game_events(self.catalog, int(time()))

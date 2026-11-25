@@ -346,8 +346,9 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
 
     @support.autocomplete("name")
     async def support_autocomplete(interaction: discord.Interaction, current: str):
-        details, fallback = await asyncio.gather(get_catalog("gametora"), get_catalog("support"))
-        records = details or fallback
+        records = await feeds.catalog("gametora", timeout=1.0)
+        if not records:
+            records = await feeds.catalog("support", timeout=1.2)
         cards_by_id = {record.get("id"): record for record in records}
         choices = []
         for _, name, card_id in name_matches(records, current, support=True)[:25]:

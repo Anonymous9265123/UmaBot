@@ -1,14 +1,17 @@
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import discord
+from discord import app_commands
 
 from umabot.alerts import UmaAlerts, scheduled_check_time, send_user_ping
-from umabot.commands.lookup import resolve_support_id
+from umabot.commands.lookup import register_uma, resolve_support_id
+from umabot.game.calendar import CM_FORECAST_CATALOG
+from umabot.game.feeds import UmaFeeds
 from umabot.stats import StatsButton, SupportComparisonView
 
 
@@ -17,6 +20,58 @@ class AlertScheduleTests(unittest.TestCase):
         scheduled = datetime(2026, 11, 23, 23, 59)
         self.assertEqual(scheduled_check_time(scheduled + timedelta(minutes=1), 1439), scheduled)
         self.assertIsNone(scheduled_check_time(scheduled + timedelta(minutes=5), 1439))
+
+
+class FeedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_release_snapshots_reuse_data_and_update_at_release_time(self):
+        release = datetime(2026, 11, 25, tzinfo=timezone.utc)
+        records = {
+            "support-cards": [{"support_id": 123, "title_en": "Test Card", "release_en": release.isoformat()}],
+            "character-cards": [{"char_id": 10, "name_en": "Test Trainee", "release_en": release.isoformat()}],
+        }
+        feeds = UmaFeeds()
+        feeds.catalog = AsyncMock(side_effect=lambda endpoint: records[endpoint])
+        timestamp = release.timestamp()
+        with patch("umabot.game.feeds.time", return_value=timestamp - 1):
+            support = await feeds.support_releases()
+            trainee = await feeds.trainee_releases()
+            self.assertIs(await feeds.support_releases(), support)
+            self.assertIs(await feeds.trainee_releases(), trainee)
+            self.assertEqual(support[0], {})
+            self.assertEqual(trainee[0]["trainee:10"], "Unreleased")
+        with patch("umabot.game.feeds.time", return_value=timestamp):
+            self.assertIn("123", (await feeds.support_releases())[0])
+            self.assertEqual((await feeds.trainee_releases())[0]["trainee:10"], "Released")
+            records["support-cards"] = []
+            self.assertEqual((await feeds.support_releases())[0], {})
+
+    async def test_events_and_champions_meeting_forecast_use_separate_feeds(self):
+        feeds = UmaFeeds()
+        feeds.load_events = AsyncMock(return_value=[])
+        forecast = {"id": 23}
+        feeds.load_forecast_timeline = AsyncMock(return_value={"future_cm": [forecast]})
+        self.assertEqual(await feeds.events(), [])
+        self.assertEqual(await feeds.catalog(CM_FORECAST_CATALOG), [forecast])
+
+
+class SupportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_game_data_is_preferred_and_fallback_is_lazy(self):
+        primary = {"id": 1, "title_en": "First Card"}
+        fallback = {"id": 2, "title_en": "Second Card"}
+        catalog = AsyncMock(return_value=[primary])
+        feeds = SimpleNamespace(catalog=catalog, events=None, projections=None)
+        async with discord.Client(intents=discord.Intents.none()) as client:
+            tree = app_commands.CommandTree(client)
+            guild = discord.Object(id=1)
+            register_uma(tree, guild, feeds=feeds)
+            command = tree.get_command("uma", guild=guild).get_command("support")
+            autocomplete = command._params["name"].autocomplete
+            self.assertEqual([choice.value for choice in await autocomplete(None, "")], ["1"])
+            catalog.assert_awaited_once_with("gametora", timeout=1.0)
+            catalog.reset_mock()
+            catalog.side_effect = [[], [fallback]]
+            self.assertEqual([choice.value for choice in await autocomplete(None, "")], ["2"])
+            self.assertEqual(catalog.await_args_list, [call("gametora", timeout=1.0), call("support", timeout=1.2)])
 
 
 class DigestTests(unittest.IsolatedAsyncioTestCase):
