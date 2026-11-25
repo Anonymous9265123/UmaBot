@@ -210,7 +210,7 @@ class UmaFeeds:
         """Build the command indexes a feature at a time using the shared cache."""
         async def index_catalog(endpoint):
             if records := await self.catalog(endpoint):
-                self.autocomplete_index(endpoint, records)
+                return self.autocomplete_index(endpoint, records)
 
         steps = (
             ("support cards", partial(index_catalog, "gametora")),
@@ -219,11 +219,18 @@ class UmaFeeds:
             ("shared skills", partial(self.skills, unique=False, timeout=None)),
             ("unique skills", partial(self.skills, unique=True, timeout=None)),
         )
+        log.info("Preparing search indexes in the background")
         for name, load in steps:
             try:
-                await load()
+                index = await load()
             except Exception:
                 log.exception("Could not preload search data for %s", name)
+                continue
+            if index and index.records_by_id:
+                log.info("Search ready for %s (%d entries)", name, len(index.records_by_id))
+            else:
+                log.info("Search data for %s is unavailable and can retry on demand", name)
+        log.info("Search preload finished")
 
     async def skills(self, *, unique, timeout=2):
         if unique:

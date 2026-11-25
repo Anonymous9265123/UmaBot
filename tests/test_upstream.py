@@ -147,8 +147,11 @@ class UpstreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_preload_does_not_block_other_indexes_or_on_demand_recovery(self):
         urls = self.mock_search_catalogs(MockResponse(status=502))
         self.session.add(urls["support-cards"], MockResponse([{"support_id": 5, "title_en": "Recovered Card"}]))
-        with self.assertLogs("umabot.game.feeds"):
+        with self.assertLogs("umabot.game.feeds") as logs:
             await self.feeds.preload_search()
+        self.assertIn("Search data for support cards is unavailable and can retry on demand", logs.output[2])
+        self.assertTrue(any("Search ready for unique skills (1 entries)" in line for line in logs.output))
+        self.assertTrue(logs.output[-1].endswith("Search preload finished"))
         self.assertNotIn("gametora", self.feeds.autocomplete_indexes)
         self.assertEqual(self.feeds.skill_indexes[True][2].resolve_id("example unique"), 4)
         self.assertEqual(self.session.calls, Counter([MANIFEST, *urls.values()]))
