@@ -6,6 +6,10 @@ UmaBot is an open-source community project. Everyone is welcome to fork the repo
 
 UmaBot was built with help from ChatGPT and may contain mistakes. When opening a pull request, please keep this in mind, verify the behavior you’re changing, and describe any issues you found and how you tested your changes.
 
+## Latest update
+
+Server managers can now use **Send test post** in `/uma setup` or `/uma news` to check that UmaBot can post an embed in the saved channel. The test sends no pings and gives the manager a private result.
+
 ## Run your own UmaBot
 
 You need Python 3.11 or newer and a Discord server where you can install apps. CI covers Python 3.11 on Ubuntu and Python 3.13 on Ubuntu and Windows.
