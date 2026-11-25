@@ -8,7 +8,7 @@ UmaBot was built with help from ChatGPT and may contain mistakes. When opening a
 
 ## Latest update
 
-Server managers can now use **Send test post** in `/uma setup` or `/uma news` to check that UmaBot can post an embed in the saved channel. The test sends no pings and gives the manager a private result.
+UmaBot now prepares search data for support cards, characters, racetracks, shared skills, and unique skills in the background after connecting to Discord. Commands and autocomplete reuse that data as it becomes ready.
 
 ## Run your own UmaBot
 
