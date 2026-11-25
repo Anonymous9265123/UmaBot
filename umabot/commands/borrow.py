@@ -54,16 +54,30 @@ def register_borrow(group, feeds, support_autocomplete):
             return
 
         name = support_name(selected) or f"Support card #{card_id}"
+        listings = await feeds.borrow_trainers(card_id, min_lb)
+        description = (
+            f"Find Global trainers listing this card at **{min_lb}LB or higher**. "
+            "Listings can change, and a trainer’s follow list may be full."
+        )
+        if listings is not None:
+            lines = []
+            for trainer_id, lb, trainer, updated in listings:
+                parts = [f"`{trainer_id}`", f"{lb}LB"]
+                if isinstance(trainer, str) and trainer.strip():
+                    parts.append(discord.utils.escape_markdown(" ".join(trainer.split())[:70]))
+                if isinstance(updated, str) and updated.strip():
+                    parts.append(f"Updated {discord.utils.escape_markdown(' '.join(updated.split())[:32])}")
+                lines.append(" · ".join(parts))
+            description += "\n\n" + ("\n".join(lines) or "No matching trainer listings found.")
+        elif feeds.umamoe_api_key:
+            description += "\n\nDirect listings are temporarily unavailable. Open the filtered search below."
         embed = discord.Embed(
             title=name[:256],
-            description=(
-                f"Find Global trainers listing this card at **{min_lb}LB or higher**. "
-                "Listings can change, and a trainer’s follow list may be full."
-            ),
+            description=description,
         )
         embed.set_footer(text=f"uma.moe · Support card #{card_id}")
         view = discord.ui.View()
         view.add_item(discord.ui.Button(label="Find trainers on uma.moe", url=trainer_search_url(card_id, min_lb)))
-        await interaction.edit_original_response(embed=embed, view=view)
+        await interaction.edit_original_response(embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none())
 
     find.autocomplete("card")(support_autocomplete)

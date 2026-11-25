@@ -187,6 +187,27 @@ class UpstreamTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.feeds.catalog(NEWS_ENDPOINT), [{"id": 2}])
         self.assertEqual(self.session.calls[NEWS], 2)
 
+    async def test_trainer_search_shares_requests_and_checks_exact_card_lb_and_ids(self):
+        self.feeds.umamoe_api_key = "fixture"
+        url = (
+            "https://uma.moe/api/v3/search?search_type=support_cards&support_card_id=30014"
+            "&min_limit_break=3&page=0&limit=20"
+        )
+        good = {"account_id": "00123", "support_card": {"support_card_id": 30014, "limit_break_count": 4}}
+        self.session.add(url, MockResponse({"items": [
+            good, good,
+            {"account_id": "456", "support_card": {"support_card_id": 30015, "limit_break_count": 4}},
+            {"account_id": "789", "support_card": {"support_card_id": 30014, "limit_break_count": 2}},
+        ], "total_pages": 1}))
+        first, second = await asyncio.gather(
+            self.feeds.borrow_trainers(30014, 3), self.feeds.borrow_trainers(30014, 3),
+        )
+        self.assertEqual(first, [("00123", 4, None, None)])
+        self.assertIs(first, second)
+        self.assertEqual(self.session.calls[url], 1)
+        self.assertEqual(self.session.options[url]["headers"], {"X-API-Key": "fixture"})
+        self.assertFalse(self.session.options[url]["allow_redirects"])
+
     async def test_birthdays_never_use_previous_day_during_cooldown(self):
         endpoint = "character/currentbirthdays"
         url = build_url(endpoint)

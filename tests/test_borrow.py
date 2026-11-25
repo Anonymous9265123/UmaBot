@@ -26,6 +26,7 @@ class BorrowTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch("aiohttp.ClientSession", side_effect=AssertionError("Unexpected live HTTP request")))
         self.enterContext(patch("umabot.commands.borrow.time", return_value=NOW))
         self.feeds = UmaFeeds()
+        self.feeds.umamoe_api_key = ""
         self.feeds.versioned_catalog = AsyncMock(return_value=[
             {"support_id": 30014, "char_name": "Same Trainee", "title_en": "First Card", "release_en": release_at(NOW)},
             {"support_id": 30015, "char_name": "Same Trainee", "title_en": "Second Card", "release_en": release_at(NOW - 1)},
@@ -73,6 +74,7 @@ class BorrowTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(f"{limit_break or 0}LB or higher", reply["embed"].description)
 
     async def test_future_unreleased_and_unknown_ids_get_no_search_link(self):
+        self.feeds.borrow_trainers = AsyncMock()
         for card, message in (
             ("30016", f"This support card releases on EN on <t:{NOW + 3600}:D>."),
             ("30017", "This support card is unreleased on EN."),
@@ -86,6 +88,20 @@ class BorrowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {call.args[0] for call in self.feeds.versioned_catalog.await_args_list}, {"support-cards"},
         )
+        self.feeds.borrow_trainers.assert_not_awaited()
+
+    async def test_direct_results_and_empty_or_unavailable_responses(self):
+        self.feeds.umamoe_api_key = "test-key"
+        self.feeds.borrow_trainers = AsyncMock(side_effect=[
+            [("001234567", 4, "Trainer", "2026-11-25")], [], None,
+        ])
+        for expected in ("`001234567` · 4LB · Trainer · Updated 2026-11-25",
+                         "No matching trainer listings found", "Direct listings are temporarily unavailable"):
+            await self.find.callback(self.interaction, "30014", min_lb=3)
+            reply = self.interaction.edit_original_response.await_args.kwargs
+            self.assertIn(expected, reply["embed"].description)
+            self.assertEqual(reply["view"].children[0].label, "Find trainers on uma.moe")
+        self.assertEqual(self.feeds.borrow_trainers.await_count, 3)
 
     async def test_character_name_without_an_exact_selection_does_not_choose_a_variant(self):
         await self.find.callback(self.interaction, "Same Trainee")

@@ -8,7 +8,7 @@ UmaBot was built with help from ChatGPT and may contain mistakes. When opening a
 
 ## Latest update
 
-Use `/uma borrow find` to open uma.moe’s Global trainer listings for an exact EN-released support card. Choose the card from autocomplete or enter its numeric ID. The search includes every limit break by default, and you can set a higher minimum.
+Use `/uma borrow find` to find Global Friend IDs for an exact EN-released support card. Hosts with an authorized uma.moe API key can show up to five listings in Discord. The command also provides a filtered website button.
 
 ## Run your own UmaBot
 
@@ -57,7 +57,7 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 | --- | --- |
 | `/uma character` | Look up a character by name or numeric ID. |
 | `/uma support`, `/uma cards` | Find a support card by card or character name. |
-| `/uma borrow find` | Open a filtered uma.moe search for Global trainers listing the selected EN support card. Minimum limit break defaults to 0. |
+| `/uma borrow find` | Find Global trainers listing the selected EN support card. Minimum limit break defaults to 0. Set `UMAMOE_API_KEY` in the bot host’s secret environment to show Friend IDs in Discord. |
 | `/uma compare` | Pick the first card, its limit break, the second card, then its limit break (defaults to 4LB). Shared stats appear first, followed by stats active on only one card. Select **Card details** for unique effects. |
 | `/uma skill`, `/uma unique` | Find a shared skill or a trainee's unique skill. |
 | `/uma track` | Show a racetrack and its courses, optionally filtered by distance in meters. |

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from collections import OrderedDict
 from functools import partial
 from time import monotonic, time
@@ -11,6 +12,7 @@ import aiohttp
 
 from ..releases import support_releases, trainee_releases
 from .api import build_url, fetch_record, gametora_data, gametora_manifest, gametora_version, support_catalog_rows
+from .borrow import trainer_listings
 from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
 from .racetracks import track_search
 from .search import NameSearch
@@ -39,6 +41,8 @@ class UmaFeeds:
         self.catalog_versions = {}
         self.catalog_attempts = {}
         self.records = OrderedDict()
+        self.trainer_search_keys = OrderedDict()
+        self.umamoe_api_key = os.getenv("UMAMOE_API_KEY", "").strip()
         self.record_requests = {}
         self.session = None
         self.transport = None
@@ -126,6 +130,8 @@ class UmaFeeds:
             return previous
         finally:
             self.refreshes.pop(key, None)
+            if isinstance(key, tuple) and key[0] == "uma.moe trainer listings" and key not in self.trainer_search_keys:
+                self.values.pop(key, None)
 
     async def load_manifest(self):
         manifest = await gametora_manifest(self.http())
@@ -247,6 +253,20 @@ class UmaFeeds:
 
     async def events(self):
         return await self.cached("EN event calendar", self.load_events, [], ttl=60)
+
+    async def borrow_trainers(self, card_id, min_lb):
+        if not self.umamoe_api_key:
+            return None
+        key = ("uma.moe trainer listings", card_id, min_lb)
+        self.trainer_search_keys[key] = None
+        self.trainer_search_keys.move_to_end(key)
+        if len(self.trainer_search_keys) > 128:
+            oldest, _ = self.trainer_search_keys.popitem(last=False)
+            self.values.pop(oldest, None)
+        return await self.cached(
+            key, lambda: trainer_listings(self.http(), self.umamoe_api_key, card_id, min_lb),
+            None, ttl=120, timeout=8, host="uma.moe",
+        )
 
     async def tracks(self, *, timeout=2):
         tracks, names = await asyncio.gather(
