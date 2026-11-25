@@ -25,6 +25,7 @@ from ..game.racetracks import RACE_DIRECTIONS, RACE_SURFACES
 from ..game.search import normalize_name
 from ..game.support_stats import has_support_stats, load_support_stats
 from ..stats import StatsButton, SupportComparisonView
+from .borrow import register_borrow
 from .community import register_community
 from .feedback import register_feedback
 
@@ -361,6 +362,7 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     compare.autocomplete("first")(support_autocomplete)
     compare.autocomplete("second")(support_autocomplete)
 
+    register_borrow(group, feeds, support_autocomplete)
     register_community(group, alerts, get_catalog, feeds.events, feeds.projections)
     if feedback is not None:
         register_feedback(group, feedback)
