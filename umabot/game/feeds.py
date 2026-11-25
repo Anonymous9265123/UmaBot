@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections import OrderedDict
+from functools import partial
 from time import monotonic, time
 from urllib.parse import urlsplit
 
@@ -204,6 +205,25 @@ class UmaFeeds:
             index = NameSearch(records, support=endpoint in {"gametora", "support"})
             self.autocomplete_indexes[endpoint] = (records, index)
         return index
+
+    async def preload_search(self):
+        """Build the command indexes a feature at a time using the shared cache."""
+        async def index_catalog(endpoint):
+            if records := await self.catalog(endpoint):
+                self.autocomplete_index(endpoint, records)
+
+        steps = (
+            ("support cards", partial(index_catalog, "gametora")),
+            ("characters", partial(index_catalog, "character/list")),
+            ("racetracks", partial(self.tracks, timeout=None)),
+            ("shared skills", partial(self.skills, unique=False, timeout=None)),
+            ("unique skills", partial(self.skills, unique=True, timeout=None)),
+        )
+        for name, load in steps:
+            try:
+                await load()
+            except Exception:
+                log.exception("Could not preload search data for %s", name)
 
     async def skills(self, *, unique, timeout=2):
         if unique:

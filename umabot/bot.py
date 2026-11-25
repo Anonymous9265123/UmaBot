@@ -33,6 +33,7 @@ class UmaBot(discord.Client):
         self.alerts_by_guild = {}
         self.syncing_guilds = set()
         self.synced_guilds = set()
+        self.search_preload = None
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
@@ -75,6 +76,9 @@ class UmaBot(discord.Client):
     async def close(self):
         for alerts in self.alerts_by_guild.values():
             alerts.poll.cancel()
+        if self.search_preload is not None:
+            self.search_preload.cancel()
+            await asyncio.gather(self.search_preload, return_exceptions=True)
         await self.feeds.close()
         await super().close()
 
@@ -85,6 +89,8 @@ class UmaBot(discord.Client):
             f"UmaBot is online as {self.user}. "
             "Use /uma setup to choose the channel for automatic updates and pings."
         )
+        if self.search_preload is None and not self.feeds.closed:
+            self.search_preload = asyncio.create_task(self.feeds.preload_search(), name="umabot-search-preload")
 
 
 async def run_bot():

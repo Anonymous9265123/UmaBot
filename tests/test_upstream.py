@@ -9,11 +9,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
+import discord
 
 from umabot.alerts import UmaAlerts
-from umabot.commands.lookup import lookup
+from umabot.bot import UmaBot
+from umabot.commands.lookup import lookup, register_uma
 from umabot.game.api import build_url
-from umabot.game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL, UmaFeeds
+from umabot.game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL, RETRY_DELAY, UmaFeeds
 from umabot.game.upstream import HostBudget, UMAPYOI_LIMITS, UpstreamCooldown
 
 
@@ -81,6 +83,96 @@ class UpstreamTests(unittest.IsolatedAsyncioTestCase):
         self.feeds = UmaFeeds()
         self.feeds.session = self.session
         self.addAsyncCleanup(self.feeds.close)
+
+    def mock_search_catalogs(self, support_response=None):
+        catalogs = {
+            "support-cards": [{"support_id": 1, "char_name": "Example Runner", "title_en": "Example Card"}],
+            "racetracks": [{"id": 2, "courses": [{"length": 1200}]}],
+            "racetracks_extended": [{"id": 2, "name_en": "Example Park"}],
+            "skills": [
+                {"id": 3, "rarity": 1, "name_en": "Corner Speed"},
+                {"id": 4, "rarity": 3, "name_en": "Example Unique", "char": [10]},
+            ],
+            "character-cards": [{"card_id": 10, "name_en": "Example Trainee", "title_en_gl": "[Parade]"}],
+        }
+        manifest = {endpoint: "aa" for endpoint in catalogs}
+        urls = {endpoint: f"https://gametora.com/data/umamusume/{endpoint}.aa.json" for endpoint in catalogs}
+        self.session.add(MANIFEST, MockResponse(manifest))
+        for endpoint, rows in catalogs.items():
+            if endpoint == "support-cards" and support_response is not None:
+                self.session.add(urls[endpoint], support_response)
+            else:
+                self.session.add(urls[endpoint], MockResponse(rows))
+        urls["character/list"] = build_url("character/list")
+        self.session.add(urls["character/list"], MockResponse([{"id": 9, "name_en": "Example Runner"}]))
+        return urls
+
+    async def test_preload_shares_catalogs_and_an_arriving_command_across_reconnects(self):
+        response = BlockingResponse([{"support_id": 1, "char_name": "Example Runner", "title_en": "Example Card"}])
+        urls = self.mock_search_catalogs(response)
+        bot = UmaBot()
+        bot.feeds = self.feeds
+        self.addAsyncCleanup(bot.close)
+        guild = discord.Object(id=1)
+        register_uma(bot.tree, guild, feeds=self.feeds)
+        support = bot.tree.get_command("uma", guild=guild).get_command("support")
+        with patch("builtins.print"):
+            await asyncio.wait_for(bot.on_ready(), timeout=1)
+            preload = bot.search_preload
+            self.assertIsNotNone(preload)
+            await asyncio.wait_for(response.entered.wait(), timeout=1)
+            self.assertEqual(self.session.calls, Counter({MANIFEST: 1, urls["support-cards"]: 1}))
+            await bot.on_ready()
+            self.assertIs(bot.search_preload, preload)
+
+        command = asyncio.create_task(support._params["name"].autocomplete(None, "example card"))
+        try:
+            await asyncio.sleep(0)
+            self.assertFalse(command.done())
+        finally:
+            response.release.set()
+        self.assertEqual([choice.value for choice in await command], ["1"])
+        await asyncio.wait_for(preload, timeout=2)
+
+        with patch("builtins.print"):
+            await bot.on_ready()
+        self.assertIs(bot.search_preload, preload)
+        self.assertEqual(self.session.calls, Counter([MANIFEST, *urls.values()]))
+        self.assertEqual(self.feeds.autocomplete_indexes["gametora"][1].resolve_id("example card"), 1)
+        self.assertEqual(self.feeds.autocomplete_indexes["character/list"][1].resolve_id("example runner"), 9)
+        self.assertEqual(self.feeds.track_index[2].resolve_id("example park"), 2)
+        self.assertEqual(self.feeds.skill_indexes[False][2].resolve_id("corner speed"), 3)
+        self.assertEqual(self.feeds.skill_indexes[True][2].resolve_id("example trainee [parade]"), 4)
+
+    async def test_failed_preload_does_not_block_other_indexes_or_on_demand_recovery(self):
+        urls = self.mock_search_catalogs(MockResponse(status=502))
+        self.session.add(urls["support-cards"], MockResponse([{"support_id": 5, "title_en": "Recovered Card"}]))
+        with self.assertLogs("umabot.game.feeds"):
+            await self.feeds.preload_search()
+        self.assertNotIn("gametora", self.feeds.autocomplete_indexes)
+        self.assertEqual(self.feeds.skill_indexes[True][2].resolve_id("example unique"), 4)
+        self.assertEqual(self.session.calls, Counter([MANIFEST, *urls.values()]))
+
+        self.now += RETRY_DELAY
+        records = await self.feeds.catalog("gametora")
+        self.assertEqual(self.feeds.autocomplete_index("gametora", records).resolve_id("recovered card"), 5)
+        self.assertEqual(self.session.calls[urls["support-cards"]], 2)
+        self.assertEqual(self.session.calls[MANIFEST], 1)
+
+    async def test_shutdown_cancels_preload_and_closes_pending_feed_requests(self):
+        response = BlockingResponse([])
+        urls = self.mock_search_catalogs(response)
+        bot = UmaBot()
+        bot.feeds = self.feeds
+        with patch("builtins.print"):
+            await bot.on_ready()
+        await asyncio.wait_for(response.entered.wait(), timeout=1)
+        await asyncio.wait_for(bot.close(), timeout=1)
+        self.assertTrue(bot.search_preload.cancelled())
+        self.assertTrue(self.feeds.closed)
+        self.assertEqual(self.feeds.refreshes, {})
+        self.session.close.assert_awaited_once()
+        self.assertEqual(self.session.calls, Counter({MANIFEST: 1, urls["support-cards"]: 1}))
 
     async def test_news_refresh_is_shared_and_expires_in_fifteen_minutes(self):
         self.session.add(NEWS, MockResponse([{"id": 1}]), MockResponse([{"id": 2}]))
