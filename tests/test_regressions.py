@@ -59,7 +59,8 @@ class SupportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
         primary = {"id": 1, "title_en": "First Card"}
         fallback = {"id": 2, "title_en": "Second Card"}
         catalog = AsyncMock(return_value=[primary])
-        feeds = SimpleNamespace(catalog=catalog, events=None, projections=None)
+        feeds = UmaFeeds()
+        feeds.catalog = catalog
         async with discord.Client(intents=discord.Intents.none()) as client:
             tree = app_commands.CommandTree(client)
             guild = discord.Object(id=1)
@@ -72,6 +73,40 @@ class SupportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
             catalog.side_effect = [[], [fallback]]
             self.assertEqual([choice.value for choice in await autocomplete(None, "")], ["2"])
             self.assertEqual(catalog.await_args_list, [call("gametora", timeout=1.0), call("support", timeout=1.2)])
+
+    async def test_character_autocomplete_reuses_normalized_queries_until_refresh(self):
+        records = [{"id": 1, "name_en": "Special Week"}]
+        feeds = UmaFeeds()
+        feeds.catalog = AsyncMock(return_value=records)
+        async with discord.Client(intents=discord.Intents.none()) as client:
+            tree = app_commands.CommandTree(client)
+            guild = discord.Object(id=1)
+            register_uma(tree, guild, feeds=feeds)
+            command = tree.get_command("uma", guild=guild).get_command("character")
+            autocomplete = command._params["name"].autocomplete
+            self.assertEqual([choice.value for choice in await autocomplete(None, "special")], ["1"])
+            index = feeds.autocomplete_index("character/list", records)
+            with patch.object(index, "rank", wraps=index.rank) as rank:
+                choices = await autocomplete(None, "SPECIAL!")
+                self.assertEqual([choice.value for choice in choices], ["1"])
+                rank.assert_not_called()
+            feeds.catalog.return_value = [{"id": 2, "name_en": "Special Week"}]
+            self.assertEqual([choice.value for choice in await autocomplete(None, "special")], ["2"])
+
+    async def test_support_normalization_stays_stable_for_the_same_raw_catalog(self):
+        feeds = UmaFeeds()
+        feeds.cached = AsyncMock(return_value=[{"support_id": 1, "char_name": "Special Week"}])
+        first = await feeds.catalog("gametora")
+        self.assertIs(await feeds.catalog("gametora"), first)
+        index = feeds.autocomplete_index("gametora", first)
+        self.assertIs(index.suggestions("Special"), index.suggestions("special!"))
+        for query in range(129):
+            index.suggestions(f"query{query}")
+        self.assertLessEqual(index._cached_suggestions.cache_info().currsize, 128)
+        feeds.cached.return_value = [{"support_id": 2, "char_name": "Special Week"}]
+        refreshed = await feeds.catalog("gametora")
+        self.assertIsNot(refreshed, first)
+        self.assertEqual(feeds.autocomplete_index("gametora", refreshed).suggestions("Special")[0][2], 2)
 
 
 class DigestTests(unittest.IsolatedAsyncioTestCase):

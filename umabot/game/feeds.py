@@ -9,6 +9,7 @@ import aiohttp
 from ..releases import support_releases, trainee_releases
 from .api import build_url, gametora_catalog, gametora_data, gametora_manifest, support_catalog_rows
 from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
+from .search import NameSearch
 
 
 log = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ class UmaFeeds:
         self.values = {}
         self.refreshes = {}
         self.release_snapshots = {}
+        self.autocomplete_indexes = {}
+        self.support_catalog = (None, [])
         self.session = None
         self.closed = False
 
@@ -93,7 +96,21 @@ class UmaFeeds:
             return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
         source = "support-cards" if endpoint == "gametora" else endpoint
         rows = await self.cached(source, lambda: self.load_catalog(source), [], timeout=timeout)
-        return support_catalog_rows(rows) if endpoint == "gametora" else rows
+        if endpoint != "gametora":
+            return rows
+        previous, support = self.support_catalog
+        if rows is not previous:
+            support = support_catalog_rows(rows)
+            self.support_catalog = (rows, support)
+        return support
+
+    def autocomplete_index(self, endpoint, records):
+        """Reuse prepared names and ranked suggestions for the current catalog."""
+        previous, index = self.autocomplete_indexes.get(endpoint, (None, None))
+        if records is not previous:
+            index = NameSearch(records, support=endpoint in {"gametora", "support"})
+            self.autocomplete_indexes[endpoint] = (records, index)
+        return index
 
     async def events(self):
         return await self.cached("EN event calendar", self.load_events, [], ttl=60)

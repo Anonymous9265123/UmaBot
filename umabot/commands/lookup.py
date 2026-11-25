@@ -1,8 +1,6 @@
 """Register /uma commands and handle Discord interactions."""
 
 import asyncio
-from difflib import SequenceMatcher
-from unicodedata import normalize
 
 import aiohttp
 import discord
@@ -25,6 +23,7 @@ from ..embeds import (
     skill_embed,
     support_embed,
 )
+from ..game.search import name_matches, normalize_name
 from ..game.support_stats import has_support_stats, load_support_stats
 from ..stats import StatsButton, SupportComparisonView
 from .community import register_community
@@ -155,51 +154,6 @@ async def lookup(
     await interaction.edit_original_response(content="The API returned an unexpected format.")
 
 
-def normalize_name(name):
-    return "".join(char for char in normalize("NFKC", name).casefold() if char.isalnum())
-
-
-def name_matches(records, query, support=False, *, alias_fields=()):
-    query = normalize_name(query)
-    ranked = []
-    keys = ("title_en", "title", "name_en", "gametora") if support else ("name_en", "name_jp", "preferred_url")
-    for record in records:
-        name = support_name(record) if support else record.get("name_en") or record.get("name_jp")
-        if not name or not isinstance(record.get("id"), int):
-            continue
-        character = normalize_name(support_character_name(record)) if support else ""
-        names = [
-            normalize_name(value)
-            for key in keys
-            if isinstance(value := record.get(key), str) and value
-        ]
-        if character:
-            names.append(character)
-        names.append(normalize_name(name))
-        score = 0
-        if query:
-            score = max(
-                4 if query == candidate else
-                3 if candidate.startswith(query) else
-                2 if query in candidate else
-                SequenceMatcher(None, query, candidate).ratio()
-                for candidate in names
-            )
-            for field in alias_fields:
-                for alias in record.get(field, ()):
-                    candidate = normalize_name(alias)
-                    if query == candidate:
-                        score = max(score, 3.5)
-                    elif candidate.startswith(query):
-                        score = max(score, 3)
-                    elif query in candidate:
-                        score = max(score, 2)
-            if score < 0.6:
-                continue
-        ranked.append((-score, name, record["id"]))
-    return sorted(ranked)
-
-
 def resolve_support_id(records, query):
     query = query.strip()
     if query.isascii() and query.isdecimal():
@@ -317,10 +271,11 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     async def character_autocomplete(interaction: discord.Interaction, current: str):
         if current.isascii() and current.isdecimal():
             return []
-        matches = name_matches(await get_catalog("character/list"), current)
+        records = await get_catalog("character/list")
+        matches = feeds.autocomplete_index("character/list", records).suggestions(current)
         return [
             app_commands.Choice(name=name[:100], value=str(character_id))
-            for _, name, character_id in matches[:25]
+            for _, name, character_id in matches
         ]
 
     @group.command(name="support", description="Search for a support card")
@@ -346,13 +301,15 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
 
     @support.autocomplete("name")
     async def support_autocomplete(interaction: discord.Interaction, current: str):
-        records = await feeds.catalog("gametora", timeout=1.0)
+        endpoint = "gametora"
+        records = await feeds.catalog(endpoint, timeout=1.0)
         if not records:
-            records = await feeds.catalog("support", timeout=1.2)
-        cards_by_id = {record.get("id"): record for record in records}
+            endpoint = "support"
+            records = await feeds.catalog(endpoint, timeout=1.2)
+        index = feeds.autocomplete_index(endpoint, records)
         choices = []
-        for _, name, card_id in name_matches(records, current, support=True)[:25]:
-            record = cards_by_id[card_id]
+        for _, name, card_id in index.suggestions(current):
+            record = index.records_by_id[card_id]
             character = support_character_name(record)
             if character and normalize_name(character) != normalize_name(name):
                 name = f"{character} — {name}"
