@@ -11,6 +11,7 @@ import aiohttp
 from ..releases import support_releases, trainee_releases
 from .api import build_url, fetch_record, gametora_data, gametora_manifest, gametora_version, support_catalog_rows
 from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
+from .racetracks import track_search
 from .search import NameSearch
 from .skills import skill_search
 from .upstream import UpstreamCooldown, UpstreamHTTP
@@ -32,6 +33,7 @@ class UmaFeeds:
         self.release_snapshots = {}
         self.autocomplete_indexes = {}
         self.skill_indexes = {}
+        self.track_index = (None, None, None)
         self.support_catalog = (None, [])
         self.catalog_versions = {}
         self.catalog_attempts = {}
@@ -218,6 +220,16 @@ class UmaFeeds:
 
     async def events(self):
         return await self.cached("EN event calendar", self.load_events, [], ttl=60)
+
+    async def tracks(self, *, timeout=2):
+        tracks, names = await asyncio.gather(
+            self.catalog("racetracks", timeout=timeout), self.catalog("racetracks_extended", timeout=timeout),
+        )
+        previous_tracks, previous_names, index = self.track_index
+        if tracks is not previous_tracks or names is not previous_names:
+            index = track_search(tracks, names)
+            self.track_index = (tracks, names, index)
+        return index
 
     async def release_snapshot(self, endpoint, build):
         """Reuse processed releases until the source changes or the next release goes live."""

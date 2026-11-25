@@ -9,6 +9,7 @@ from discord import app_commands
 
 from ..alert_settings import alert_channel, parse_alert_time
 from ..game.calendar import BANNER_CATALOGS, CM_CATALOG, CM_FORECAST_CATALOG, CM_REFERENCE_CATALOG, CM_URL
+from ..game.racetracks import RACE_DIRECTIONS, RACE_SURFACES
 
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -90,8 +91,8 @@ def register_community(group, alerts, get_catalog, get_events, get_projections):
         if race := meeting.get("race"):
             track = next((row.get("name_en") for row in tracks if row.get("id") == race.get("track")), None)
             distance = race.get("distance")
-            surface = {1: "Turf", 2: "Dirt"}.get(race.get("ground"))
-            direction = {1: "Right", 2: "Left", 4: "Straight"}.get(race.get("turn"))
+            surface = RACE_SURFACES.get(race.get("ground"))
+            direction = RACE_DIRECTIONS.get(race.get("turn"))
             course = (track, f"{distance:,} m" if isinstance(distance, int) else None, surface, direction)
             if any(course):
                 embed.add_field(name="Course", value=" · ".join(filter(None, course)), inline=False)

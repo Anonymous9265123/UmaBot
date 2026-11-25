@@ -11,7 +11,6 @@ from ..game.api import (
     birthday_image,
     build_url,
     related_character_data,
-    support_catalog_rows,
     support_character_name,
     support_name,
 )
@@ -22,7 +21,8 @@ from ..embeds import (
     skill_embed,
     support_embed,
 )
-from ..game.search import name_matches, normalize_name
+from ..game.racetracks import RACE_DIRECTIONS, RACE_SURFACES
+from ..game.search import normalize_name
 from ..game.support_stats import has_support_stats, load_support_stats
 from ..stats import StatsButton, SupportComparisonView
 from .community import register_community
@@ -152,14 +152,6 @@ async def lookup(
     await interaction.edit_original_response(content="The API returned an unexpected format.")
 
 
-def resolve_support_id(records, query):
-    query = query.strip()
-    if query.isascii() and query.isdecimal():
-        return int(query)
-    matches = name_matches(records, query, support=True) if normalize_name(query) else []
-    return matches[0][2] if matches else None
-
-
 def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     group = app_commands.Group(
         name="uma",
@@ -254,12 +246,11 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         else:
             await interaction.response.defer(thinking=True)
             characters = await get_catalog("character/list")
-            matches = name_matches(characters, name) if normalize_name(name) else []
-            if not matches:
+            character_id = feeds.autocomplete_index("character/list", characters).resolve_id(name)
+            if character_id is None:
                 message = "No matching character found." if characters else "The character list is temporarily unavailable."
                 await interaction.edit_original_response(content=message)
                 return
-            character_id = matches[0][2]
         await lookup(
             interaction, f"character/{character_id}", "Character details",
             character_profile=True, alerts=alerts,
@@ -282,16 +273,17 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         name = name.strip()
         await interaction.response.defer(thinking=True)
         details = await get_catalog("gametora")
+        index = feeds.autocomplete_index("gametora", details)
         cards = details
-        card_id = resolve_support_id(cards, name)
+        card_id = index.resolve_id(name)
         if card_id is None and not cards:
             cards = await get_catalog("support")
-            card_id = resolve_support_id(cards, name)
+            card_id = feeds.autocomplete_index("support", cards).resolve_id(name)
         if card_id is None:
             message = "No matching support card found." if cards else "The support card list is temporarily unavailable."
             await interaction.edit_original_response(content=message)
             return
-        metadata = next((card for card in details if card["id"] == card_id), {})
+        metadata = index.records_by_id.get(card_id, {})
         await lookup(
             interaction, f"support/{card_id}", "Support card details",
             support_metadata=metadata, alerts=alerts,
@@ -346,16 +338,15 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         second_lb: int = 4,
     ):
         await interaction.response.defer(thinking=True)
-        raw_cards, definitions = await load_support_stats(feeds)
-        if not raw_cards or definitions is None:
+        records, definitions = await load_support_stats(feeds, card_catalog="gametora")
+        if not records or definitions is None:
             await interaction.edit_original_response(content="Support card stats are temporarily unavailable.")
             return
 
-        records = support_catalog_rows(raw_cards)
-        cards_by_id = {card["id"]: card for card in records}
+        index = feeds.autocomplete_index("gametora", records)
         selected = []
         for position, query in (("first", first), ("second", second)):
-            card = cards_by_id.get(resolve_support_id(records, query))
+            card = index.records_by_id.get(index.resolve_id(query))
             if card is None:
                 await interaction.edit_original_response(content=f"No match for the {position} support card. Try a card name or ID.")
                 return
@@ -409,12 +400,7 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         if not index.records_by_id:
             await interaction.edit_original_response(content="The GameTora skill catalog is temporarily unavailable.")
             return
-        if name.isascii() and name.isdecimal():
-            skill_id = int(name)
-        else:
-            matches = index.suggestions(name) if normalize_name(name) else ()
-            skill_id = matches[0][2] if matches else None
-        row = index.records_by_id.get(skill_id)
+        row = index.records_by_id.get(index.resolve_id(name))
         if row is None:
             command = "/uma skill" if unique else "/uma unique"
             await interaction.edit_original_response(content=f"No matching skill found. You can also search with `{command}`.")
@@ -457,23 +443,6 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
             choices.append(app_commands.Choice(name=name[:100], value=str(skill_id)))
         return choices
 
-    async def track_catalog():
-        tracks, names = await asyncio.gather(get_catalog("racetracks"), get_catalog("racetracks_extended"))
-        courses_by_id = {str(row.get("id")): row["courses"] for row in tracks}
-        return [
-            {**row, "courses": courses_by_id[str(row["id"])]}
-            for row in names if str(row.get("id")) in courses_by_id
-        ]
-
-    def find_track(rows, track):
-        track = track.strip()
-        if track.isascii() and track.isdecimal():
-            track_id = int(track)
-        else:
-            matches = name_matches(rows, track) if normalize_name(track) else []
-            track_id = matches[0][2] if matches else None
-        return next((row for row in rows if row.get("id") == track_id), None)
-
     @group.command(name="track", description="View an Umamusume racetrack and its courses")
     @app_commands.describe(track="Enter a track name or choose a suggestion", distance="Optional course distance in meters")
     async def racetrack(
@@ -482,11 +451,11 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         distance: app_commands.Range[int, 1, 5000] | None = None,
     ):
         await interaction.response.defer(thinking=True)
-        rows = await track_catalog()
-        if not rows:
+        index = await feeds.tracks()
+        if not index.records_by_id:
             await interaction.edit_original_response(content="The GameTora racetrack catalog is temporarily unavailable.")
             return
-        row = find_track(rows, track)
+        row = index.records_by_id.get(index.resolve_id(track))
         if row is None:
             await interaction.edit_original_response(content="No matching racetrack found.")
             return
@@ -498,8 +467,8 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         embed = discord.Embed(title=row["name_en"], url="https://gametora.com/umamusume/racetracks")
         lines = []
         for course in sorted(courses, key=lambda item: (item["length"], item["terrain"], item["id"])):
-            terrain = {1: "Turf", 2: "Dirt"}.get(course["terrain"], "Unknown surface")
-            direction = {1: "Right", 2: "Left", 4: "Straight"}.get(course["turn"], "Unknown direction")
+            terrain = RACE_SURFACES.get(course["terrain"], "Unknown surface")
+            direction = RACE_DIRECTIONS.get(course["turn"], "Unknown direction")
             layout = {2: "Inner", 3: "Outer"}.get(course.get("inout"))
             label = " · ".join(part for part in (f"{course['length']} m", terrain, direction, layout) if part)
             if distance is None:
@@ -520,9 +489,10 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
 
     @racetrack.autocomplete("track")
     async def racetrack_autocomplete(interaction: discord.Interaction, current: str):
+        index = await feeds.tracks()
         return [
             app_commands.Choice(name=name[:100], value=str(track_id))
-            for _, name, track_id in name_matches(await track_catalog(), current)[:25]
+            for _, name, track_id in index.suggestions(current)
         ]
 
     @racetrack.autocomplete("distance")
@@ -530,7 +500,8 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         track = interaction.namespace.track
         if not track:
             return []
-        row = find_track(await track_catalog(), track)
+        index = await feeds.tracks()
+        row = index.records_by_id.get(index.resolve_id(track))
         if row is None:
             return []
         prefix = str(current or "")

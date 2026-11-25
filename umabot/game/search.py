@@ -63,11 +63,19 @@ class NameSearch:
     def _suggestions(self, normalized_query):
         return tuple(self.rank(normalized_query)[:25])
 
-    def suggestions(self, query):
+    def _suggestions_for(self, normalized_query):
         if self._cached_suggestions is None:
             self._cached_suggestions = lru_cache(maxsize=128)(self._suggestions)
-        return self._cached_suggestions(normalize_name(query))
+        return self._cached_suggestions(normalized_query)
 
+    def suggestions(self, query):
+        return self._suggestions_for(normalize_name(query))
 
-def name_matches(records, query, support=False, *, alias_fields=()):
-    return NameSearch(records, support=support, alias_fields=alias_fields).rank(normalize_name(query))
+    def resolve_id(self, query):
+        """Return an explicit numeric ID or the highest-ranked name match."""
+        query = query.strip()
+        if query.isascii() and query.isdecimal():
+            return int(query)
+        normalized = normalize_name(query)
+        matches = self._suggestions_for(normalized) if normalized else ()
+        return matches[0][2] if matches else None

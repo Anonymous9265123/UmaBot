@@ -9,9 +9,11 @@ import discord
 from discord import app_commands
 
 from umabot.alerts import UmaAlerts, scheduled_check_time, send_user_ping
-from umabot.commands.lookup import register_uma, resolve_support_id
-from umabot.game.calendar import CM_FORECAST_CATALOG
+from umabot.commands.lookup import register_uma
+from umabot.game.calendar import CM_CATALOG, CM_FORECAST_CATALOG
 from umabot.game.feeds import UmaFeeds
+from umabot.game.racetracks import track_search
+from umabot.game.search import NameSearch
 from umabot.stats import StatsButton, SupportComparisonView
 
 
@@ -220,8 +222,119 @@ class ComparisonTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Lv 45", embed.description)
         self.assertIn("5%", embed.fields[0].value)
 
-    def test_support_lookup_accepts_id_or_card_title(self):
+    def test_name_resolution_accepts_ascii_ids_and_rejects_empty_or_unmatched_names(self):
         records = [{"id": 123, "title_en": "Training for Victory", "name_en": "Test Trainee"}]
-        self.assertEqual(resolve_support_id(records, "123"), 123)
-        self.assertEqual(resolve_support_id(records, "training for victory"), 123)
-        self.assertIsNone(resolve_support_id(records, "???"))
+        index = NameSearch(records, support=True)
+        self.assertEqual(index.resolve_id(" 00456 "), 456)
+        self.assertEqual(index.resolve_id("training for victory"), 123)
+        for query in ("", "  ", "???", "zzz", "１２３"):
+            with self.subTest(query=query):
+                self.assertIsNone(index.resolve_id(query))
+
+
+class CatalogLookupTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.feeds = UmaFeeds()
+        client = await self.enterAsyncContext(discord.Client(intents=discord.Intents.none()))
+        tree = app_commands.CommandTree(client)
+        guild = discord.Object(id=1)
+        register_uma(tree, guild, feeds=self.feeds)
+        self.group = tree.get_command("uma", guild=guild)
+
+    def interaction(self, *, track=None):
+        return SimpleNamespace(
+            user=SimpleNamespace(id=10),
+            namespace=SimpleNamespace(track=track),
+            response=SimpleNamespace(defer=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+    async def test_support_autocomplete_and_compare_share_index_and_select_both_cards(self):
+        rows = {
+            "support-cards": [
+                {"support_id": 1, "char_name": "Special Week", "title_en": "Early Start", "rarity": 3, "effects": [[1, 5]]},
+                {"support_id": 2, "char_name": "Silence Suzuka", "title_en": "Final Stretch", "rarity": 2, "effects": [[1, 8]]},
+            ],
+            "support_effects": [{"id": 1, "name_en": "Training Effect", "symbol": "percent"}],
+        }
+        self.feeds.versioned_catalog = AsyncMock(side_effect=lambda endpoint, empty, **kwargs: rows[endpoint])
+        autocomplete = self.group.get_command("support")._params["name"].autocomplete
+        self.assertEqual([choice.value for choice in await autocomplete(None, "Early Start")], ["1"])
+        index = self.feeds.autocomplete_indexes["gametora"][1]
+        compare = self.group.get_command("compare")
+        interaction = self.interaction()
+        with (
+            patch("umabot.game.feeds.NameSearch", side_effect=AssertionError("Already indexed")),
+            patch.object(index, "resolve_id", wraps=index.resolve_id) as resolve,
+        ):
+            await compare.callback(interaction, "Final Stretch", 2, "Early Start")
+            self.assertEqual(resolve.call_args_list, [call("Final Stretch"), call("Early Start")])
+        view = interaction.edit_original_response.await_args.kwargs["view"]
+        self.assertEqual([card["support_id"] for card in view.cards], [2, 1])
+        self.assertEqual(view.limit_breaks, (2, 4))
+        await compare.callback(interaction, "Final Stretch", 2, "???")
+        self.assertIn("No match for the second support card", interaction.edit_original_response.await_args.kwargs["content"])
+
+    async def test_numeric_character_lookup_skips_catalog(self):
+        self.feeds.catalog = AsyncMock()
+        command = self.group.get_command("character")
+        interaction = self.interaction()
+        with patch("umabot.commands.lookup.lookup", new_callable=AsyncMock) as lookup:
+            await command.callback(interaction, " 00123 ")
+        self.feeds.catalog.assert_not_awaited()
+        lookup.assert_awaited_once_with(interaction, "character/00123", "Character details", character_profile=True, alerts=None)
+
+    async def test_support_lookup_falls_back_to_umapyoi_without_using_first_suggestion(self):
+        self.feeds.catalog = AsyncMock(side_effect=lambda endpoint, **kwargs: {
+            "gametora": [], "support": [{"id": 2, "title_en": "Final Stretch"}],
+        }[endpoint])
+        command = self.group.get_command("support")
+        interaction = self.interaction()
+        with patch("umabot.commands.lookup.lookup", new_callable=AsyncMock) as lookup:
+            for query in ("   ", "???"):
+                await command.callback(interaction, query)
+                self.assertEqual(interaction.edit_original_response.await_args.kwargs["content"], "No matching support card found.")
+            lookup.assert_not_awaited()
+            await command.callback(interaction, "Final Stretch")
+            lookup.assert_awaited_once_with(interaction, "support/2", "Support card details", support_metadata={}, alerts=None)
+
+    async def test_track_commands_reuse_join_and_refresh_after_either_source_changes(self):
+        rows = {
+            "racetracks": [{"id": "7", "courses": [
+                {"id": 20, "length": 1800, "terrain": 99, "turn": 99, "corners": [{}, {}],
+                 "straights": [{"start": 1500, "end": 1800}], "spurtStart": {"meters": 1200}},
+                {"id": 10, "length": 1200, "terrain": 2, "turn": 4},
+            ]}],
+            "racetracks_extended": [{"id": 7, "name_en": "Example Park"}],
+            CM_CATALOG: [{"id": 1, "name_en": "Example Cup", "start": 90, "end": 110,
+                          "race": {"track": 7, "distance": 1800, "ground": 99, "turn": 99}}],
+        }
+        self.feeds.catalog = AsyncMock(side_effect=lambda endpoint, **kwargs: rows[endpoint])
+        track = self.group.get_command("track")
+        names = track._params["track"].autocomplete
+        distances = track._params["distance"].autocomplete
+        interaction = self.interaction(track="Example")
+        with patch("umabot.game.feeds.track_search", wraps=track_search) as build:
+            await track.callback(interaction, "Example")
+            embed = interaction.edit_original_response.await_args.kwargs["embed"]
+            self.assertLess(embed.description.index("1200 m"), embed.description.index("1800 m"))
+            self.assertIn("Dirt · Straight", embed.description)
+            self.assertIn("Unknown surface · Unknown direction", embed.description)
+            self.assertEqual([choice.value for choice in await names(interaction, "example")], ["7"])
+            self.assertEqual([choice.value for choice in await distances(interaction, 1)], [1200, 1800])
+            await track.callback(interaction, "7", 1800)
+            field = interaction.edit_original_response.await_args.kwargs["embed"].fields[0]
+            self.assertEqual(field.value, "Corners: 2\nFinal straight: 300 m\nLast spurt starts at 1,200 m")
+            build.assert_called_once()
+
+            with patch("umabot.commands.community.time", return_value=100):
+                await self.group.get_command("cm").callback(interaction)
+            fields = interaction.edit_original_response.await_args.kwargs["embed"].fields
+            self.assertEqual(fields[0].value, "Example Park · 1,800 m")
+
+            rows["racetracks"] = [{"id": "7", "courses": [{"id": 30, "length": 2200, "terrain": 1, "turn": 1}]}]
+            self.assertEqual([choice.value for choice in await distances(interaction, 2)], [2200])
+            self.assertEqual(build.call_count, 2)
+            rows["racetracks_extended"] = [{"id": 7, "name_en": "New Park"}]
+            self.assertEqual([choice.name for choice in await names(interaction, "new")], ["New Park"])
+            self.assertEqual(build.call_count, 3)

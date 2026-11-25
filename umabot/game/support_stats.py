@@ -7,8 +7,8 @@ BASE_LEVELS = {1: 20, 2: 25, 3: 30}
 EFFECT_LEVELS = (1, *range(5, 51, 5))
 
 
-async def load_support_stats(feeds):
-    cards, effects = await asyncio.gather(feeds.catalog("support-cards"), feeds.catalog("support_effects"))
+async def load_support_stats(feeds, *, card_catalog="support-cards"):
+    cards, effects = await asyncio.gather(feeds.catalog(card_catalog), feeds.catalog("support_effects"))
     definitions = {effect["id"]: effect for effect in effects if "id" in effect}
     return cards, definitions if effects else None
 
