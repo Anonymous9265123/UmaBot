@@ -2,18 +2,24 @@
 
 import asyncio
 import logging
+from collections import OrderedDict
 from time import monotonic, time
 
 import aiohttp
 
 from ..releases import support_releases, trainee_releases
-from .api import build_url, gametora_catalog, gametora_data, gametora_manifest, support_catalog_rows
+from .api import build_url, fetch_record, gametora_data, gametora_manifest, gametora_version, support_catalog_rows
 from .calendar import CM_FORECAST_CATALOG, game_events, projected_events
 from .search import NameSearch
+from .skills import skill_search
+from .upstream import UpstreamCooldown, UpstreamHTTP
 
 
 log = logging.getLogger(__name__)
 FEED_TTL = 3600
+NEWS_TTL = 15 * 60
+NEWS_ENDPOINT = "en/news/latest/20"
+UMAPYOI_CATALOGS = {"character/list", "support", NEWS_ENDPOINT}
 RETRY_DELAY = 60
 
 
@@ -23,14 +29,34 @@ class UmaFeeds:
         self.refreshes = {}
         self.release_snapshots = {}
         self.autocomplete_indexes = {}
+        self.skill_indexes = {}
         self.support_catalog = (None, [])
+        self.catalog_versions = {}
+        self.catalog_attempts = {}
+        self.records = OrderedDict()
         self.session = None
+        self.transport = None
         self.closed = False
 
     def http(self):
-        if self.session is None:
-            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
-        return self.session
+        if self.transport is None:
+            if self.session is None:
+                self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
+            self.transport = UpstreamHTTP(self.session)
+        return self.transport
+
+    async def record(self, url, *, timeout=30, allow_redirects=False):
+        key = (url, allow_redirects)
+        try:
+            status, data = await fetch_record(self.http(), url, timeout=timeout, allow_redirects=allow_redirects)
+        except UpstreamCooldown:
+            return self.records.get(key, (429, None))
+        if 200 <= status < 300:
+            self.records[key] = (status, data)
+            self.records.move_to_end(key)
+            if len(self.records) > 256:
+                self.records.popitem(last=False)
+        return status, data
 
     async def close(self):
         self.closed = True
@@ -42,9 +68,9 @@ class UmaFeeds:
         if self.session is not None:
             await self.session.close()
 
-    async def cached(self, key, load, empty, *, ttl=FEED_TTL, timeout=None):
+    async def cached(self, key, load, empty, *, ttl=FEED_TTL, timeout=None, host=None):
         value, expires = self.values.get(key, (empty, 0))
-        if self.closed or monotonic() < expires:
+        if self.closed or monotonic() < expires or (host and self.transport and self.transport.cooling_down(host)):
             return value
         task = self.refreshes.get(key)
         if task is None:
@@ -61,6 +87,9 @@ class UmaFeeds:
             value = await load()
             self.values[key] = (value, monotonic() + ttl)
             return value
+        except UpstreamCooldown as error:
+            self.values[key] = (previous, error.retry_at)
+            return previous
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
             log.warning("Could not refresh %s: %s", key, error)
             self.values[key] = (previous, monotonic() + RETRY_DELAY)
@@ -75,27 +104,62 @@ class UmaFeeds:
         return manifest
 
     async def load_catalog(self, endpoint):
-        if endpoint in {"character/list", "support", "en/news/latest/20"}:
-            async with self.http().get(build_url(endpoint)) as response:
-                response.raise_for_status()
-                rows = await response.json(content_type=None)
-        else:
-            manifest = await self.cached("GameTora manifest", self.load_manifest, {})
-            rows = await gametora_catalog(self.http(), endpoint, manifest=manifest)
+        async with self.http().get(build_url(endpoint)) as response:
+            response.raise_for_status()
+            rows = await response.json(content_type=None)
         if not isinstance(rows, list):
             raise ValueError("Expected a list of records")
-        if endpoint == "en/news/latest/20":
+        if endpoint == NEWS_ENDPOINT:
             return [row for row in rows if isinstance(row, dict)]
         if not all(isinstance(row, dict) for row in rows):
             raise ValueError("Unexpected catalog record format")
         return rows
+
+    async def load_version(self, endpoint, version, key):
+        data = await gametora_data(self.http(), endpoint, version)
+        if endpoint == CM_FORECAST_CATALOG:
+            valid = isinstance(data, dict)
+        else:
+            valid = isinstance(data, list) and all(isinstance(row, dict) for row in data)
+        if not valid:
+            raise ValueError(f"Unexpected GameTora catalog format for {endpoint}")
+        if self.catalog_attempts[endpoint] != version:
+            return self.values[key][0]
+        self.catalog_versions[endpoint] = version
+        return data
+
+    async def versioned_catalog(self, endpoint, empty, *, timeout=None):
+        key = ("GameTora catalog", endpoint)
+        try:
+            async with asyncio.timeout(timeout):
+                manifest = await self.cached("GameTora manifest", self.load_manifest, {}, host="gametora.com")
+                previous = self.values.get(key, (empty, 0))[0]
+                version = gametora_version(manifest, endpoint)
+                if version is None:
+                    return previous
+                if self.catalog_attempts.get(endpoint) != version:
+                    self.catalog_attempts[endpoint] = version
+                    self.values[key] = (previous, 0)
+                if self.catalog_versions.get(endpoint) == version:
+                    return previous
+                return await self.cached(
+                    key, lambda: self.load_version(endpoint, version, key), empty, ttl=0, host="gametora.com",
+                )
+        except TimeoutError:
+            return self.values.get(key, (empty, 0))[0]
 
     async def catalog(self, endpoint, *, timeout=None):
         if endpoint == CM_FORECAST_CATALOG:
             rows = (await self.forecast_timeline(timeout=timeout)).get("future_cm")
             return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
         source = "support-cards" if endpoint == "gametora" else endpoint
-        rows = await self.cached(source, lambda: self.load_catalog(source), [], timeout=timeout)
+        if source in UMAPYOI_CATALOGS:
+            ttl = NEWS_TTL if source == NEWS_ENDPOINT else FEED_TTL
+            rows = await self.cached(
+                source, lambda: self.load_catalog(source), [], ttl=ttl, timeout=timeout, host="umapyoi.net",
+            )
+        else:
+            rows = await self.versioned_catalog(source, [], timeout=timeout)
         if endpoint != "gametora":
             return rows
         previous, support = self.support_catalog
@@ -110,6 +174,19 @@ class UmaFeeds:
         if records is not previous:
             index = NameSearch(records, support=endpoint in {"gametora", "support"})
             self.autocomplete_indexes[endpoint] = (records, index)
+        return index
+
+    async def skills(self, *, unique, timeout=2):
+        if unique:
+            skills, trainees = await asyncio.gather(
+                self.catalog("skills", timeout=timeout), self.catalog("character-cards", timeout=timeout),
+            )
+        else:
+            skills, trainees = await self.catalog("skills", timeout=timeout), ()
+        previous, previous_trainees, index = self.skill_indexes.get(unique, (None, None, None))
+        if skills is not previous or trainees is not previous_trainees:
+            index = skill_search(skills, trainees, unique=unique)
+            self.skill_indexes[unique] = (skills, trainees, index)
         return index
 
     async def events(self):
@@ -134,15 +211,8 @@ class UmaFeeds:
     async def load_events(self):
         return await game_events(self.catalog, int(time()))
 
-    async def load_forecast_timeline(self):
-        manifest = await self.cached("GameTora manifest", self.load_manifest, {})
-        timeline = await gametora_data(self.http(), CM_FORECAST_CATALOG, manifest=manifest)
-        if not isinstance(timeline, dict):
-            raise ValueError("Unexpected GameTora forecast timeline format")
-        return timeline
-
     async def forecast_timeline(self, *, timeout=None):
-        return await self.cached("GameTora forecast timeline", self.load_forecast_timeline, {}, timeout=timeout)
+        return await self.versioned_catalog(CM_FORECAST_CATALOG, {}, timeout=timeout)
 
     async def projections(self, confirmed, now):
         return await projected_events(await self.forecast_timeline(), self.catalog, confirmed, now)

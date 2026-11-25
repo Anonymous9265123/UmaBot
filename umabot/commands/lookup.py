@@ -10,7 +10,6 @@ from ..alert_settings import AlertPreferences, PostingDestination
 from ..game.api import (
     birthday_image,
     build_url,
-    fetch_record,
     related_character_data,
     support_catalog_rows,
     support_character_name,
@@ -60,7 +59,7 @@ class SubscriptionPage(discord.ui.View):
             self.stop()
 
 
-async def show_birthdays(interaction, session, data):
+async def show_birthdays(interaction, fetch, data):
     entries = list(birthday_entries(data))
     if not entries:
         await interaction.edit_original_response(content="No birthdays found.")
@@ -68,13 +67,13 @@ async def show_birthdays(interaction, session, data):
 
     visible = entries[:10]
     images = await asyncio.gather(
-        *(birthday_image(session, character) for _, _, character in visible)
+        *(birthday_image(fetch, character) for _, _, character in visible)
     )
     remaining = "\n".join(f"- {heading} — {name}" for heading, name, _ in entries[10:])
     await interaction.edit_original_response(content=remaining or None, embeds=birthday_embeds(visible, images))
 
 
-async def show_character(interaction, session, profile, alerts):
+async def show_character(interaction, fetch, profile, alerts):
     game_id = profile.get("game_id")
     if not isinstance(game_id, int):
         await interaction.edit_original_response(embed=character_embed(profile), view=None)
@@ -82,8 +81,8 @@ async def show_character(interaction, session, profile, alerts):
 
     topic = f"trainee:{game_id}"
     requests = [
-        related_character_data(session, "outfit", game_id),
-        related_character_data(session, "support", game_id),
+        related_character_data(fetch, "outfit", game_id),
+        related_character_data(fetch, "support", game_id),
     ]
     if alerts:
         requests.append(alerts.trainee_status(topic))
@@ -111,27 +110,26 @@ async def lookup(
         return
 
     try:
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            status, data = await fetch_record(session, url)
-            if 300 <= status < 400:
-                message = f"**{heading}**\n<{data}>" if data else "This endpoint returned a redirect without a usable link."
-                await interaction.edit_original_response(content=message)
-                return
-            if status == 404:
-                await interaction.edit_original_response(content="Couldn't find that record.")
-                return
-            if status == 429:
-                await interaction.edit_original_response(content="Too many requests. Try again later.")
-                return
+        fetch = interaction.client.feeds.record
+        status, data = await fetch(url)
+        if 300 <= status < 400:
+            message = f"**{heading}**\n<{data}>" if data else "This endpoint returned a redirect without a usable link."
+            await interaction.edit_original_response(content=message)
+            return
+        if status == 404:
+            await interaction.edit_original_response(content="Couldn't find that record.")
+            return
+        if status == 429:
+            await interaction.edit_original_response(content="Too many requests. Try again later.")
+            return
 
-            if birthdays:
-                await show_birthdays(interaction, session, data)
-                return
+        if birthdays:
+            await show_birthdays(interaction, fetch, data)
+            return
 
-            if character_profile and isinstance(data, dict):
-                await show_character(interaction, session, data, alerts)
-                return
+        if character_profile and isinstance(data, dict):
+            await show_character(interaction, fetch, data, alerts)
+            return
 
     except asyncio.TimeoutError:
         await interaction.edit_original_response(content="The API took too long to respond.")
@@ -405,20 +403,18 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
             embed=discord.Embed(title="UmaBot commands", description=description), ephemeral=True,
         )
 
-    unique_aliases = ("owners", "owner_outfits")
-
     async def show_skill(interaction, name, *, unique):
         await interaction.response.defer(thinking=True)
-        rows, definitions = await asyncio.gather(skill_catalog(unique=unique), get_catalog("static/skill_conditions"))
-        if not rows:
+        index, definitions = await asyncio.gather(feeds.skills(unique=unique), get_catalog("static/skill_conditions"))
+        if not index.records_by_id:
             await interaction.edit_original_response(content="The GameTora skill catalog is temporarily unavailable.")
             return
         if name.isascii() and name.isdecimal():
             skill_id = int(name)
         else:
-            matches = name_matches(rows, name, alias_fields=unique_aliases if unique else ()) if normalize_name(name) else []
+            matches = index.suggestions(name) if normalize_name(name) else ()
             skill_id = matches[0][2] if matches else None
-        row = next((row for row in rows if row.get("id") == skill_id), None)
+        row = index.records_by_id.get(skill_id)
         if row is None:
             command = "/uma skill" if unique else "/uma unique"
             await interaction.edit_original_response(content=f"No matching skill found. You can also search with `{command}`.")
@@ -436,41 +432,6 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     async def unique_skill(interaction: discord.Interaction, name: app_commands.Range[str, 1, 100]):
         await show_skill(interaction, name, unique=True)
 
-    async def skill_catalog(*, unique):
-        if unique:
-            skills, trainees = await asyncio.gather(get_catalog("skills"), get_catalog("character-cards"))
-        else:
-            skills, trainees = await get_catalog("skills"), []
-        names = {row.get("card_id"): row.get("name_en") or row.get("name_jp") for row in trainees}
-        outfits = {}
-        for trainee in trainees:
-            card_id = trainee.get("card_id")
-            if not (trainee_name := names.get(card_id)):
-                continue
-            title = trainee.get("title_en_gl") or trainee.get("title")
-            outfits[card_id] = f"{trainee_name} [{title.strip('[]')}]" if title else trainee_name
-        rows = {}
-        for skill in skills:
-            rarity = skill.get("rarity")
-            if rarity not in ({3, 4, 5} if unique else {1, 2}) or skill.get("inherited"):
-                continue
-            localized = (skill.get("loc") or {}).get("en") or {}
-            row = {**skill, **localized}
-            cards = [card for card in (row.get("char") or []) if card in outfits] if unique else []
-            owners = sorted({names[card] for card in cards if names.get(card)})
-            cards.sort(key=outfits.get)
-            owner_outfits = list(dict.fromkeys(outfits[card] for card in cards))
-            owner_card = cards[0] if cards else None
-            name = row.get("name_en") or row.get("enname") or row.get("jpname")
-            if not name:
-                continue
-            row = {**row, "name_en": name, "owners": owners, "owner_outfits": owner_outfits, "owner_card": owner_card}
-            inherited = skill.get("gene_version") if unique else None
-            if inherited:
-                row["inherited_version"] = {**inherited, **(localized.get("gene_version") or {})}
-            rows[row["id"]] = row
-        return list(rows.values())
-
     @skill.autocomplete("name")
     async def skill_autocomplete(interaction: discord.Interaction, current: str):
         return await skill_choices(current, unique=False)
@@ -482,14 +443,13 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
     async def skill_choices(current, *, unique):
         try:
             async with asyncio.timeout(2.5):
-                rows = await skill_catalog(unique=unique)
+                index = await feeds.skills(unique=unique)
         except TimeoutError:
             return []
-        by_id = {row["id"]: row for row in rows}
         choices = []
         query = normalize_name(current or "")
-        for _, name, skill_id in name_matches(rows, current or "", alias_fields=unique_aliases if unique else ())[:25]:
-            outfits = by_id[skill_id]["owner_outfits"]
+        for _, name, skill_id in index.suggestions(current or ""):
+            outfits = index.records_by_id[skill_id]["owner_outfits"]
             if outfits:
                 owner = next((outfit for outfit in outfits if query in normalize_name(outfit)), outfits[0])[:70]
                 suffix = f" — {owner}" + (f" +{len(outfits) - 1}" if len(outfits) > 1 else "")

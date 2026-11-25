@@ -49,7 +49,7 @@ class FeedTests(unittest.IsolatedAsyncioTestCase):
         feeds = UmaFeeds()
         feeds.load_events = AsyncMock(return_value=[])
         forecast = {"id": 23}
-        feeds.load_forecast_timeline = AsyncMock(return_value={"future_cm": [forecast]})
+        feeds.versioned_catalog = AsyncMock(return_value={"future_cm": [forecast]})
         self.assertEqual(await feeds.events(), [])
         self.assertEqual(await feeds.catalog(CM_FORECAST_CATALOG), [forecast])
 
@@ -95,7 +95,7 @@ class SupportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_support_normalization_stays_stable_for_the_same_raw_catalog(self):
         feeds = UmaFeeds()
-        feeds.cached = AsyncMock(return_value=[{"support_id": 1, "char_name": "Special Week"}])
+        feeds.versioned_catalog = AsyncMock(return_value=[{"support_id": 1, "char_name": "Special Week"}])
         first = await feeds.catalog("gametora")
         self.assertIs(await feeds.catalog("gametora"), first)
         index = feeds.autocomplete_index("gametora", first)
@@ -103,10 +103,54 @@ class SupportAutocompleteTests(unittest.IsolatedAsyncioTestCase):
         for query in range(129):
             index.suggestions(f"query{query}")
         self.assertLessEqual(index._cached_suggestions.cache_info().currsize, 128)
-        feeds.cached.return_value = [{"support_id": 2, "char_name": "Special Week"}]
+        feeds.versioned_catalog.return_value = [{"support_id": 2, "char_name": "Special Week"}]
         refreshed = await feeds.catalog("gametora")
         self.assertIsNot(refreshed, first)
         self.assertEqual(feeds.autocomplete_index("gametora", refreshed).suggestions("Special")[0][2], 2)
+
+
+class SkillAutocompleteTests(unittest.IsolatedAsyncioTestCase):
+    async def test_suggestions_preserve_owner_aliases_and_rebuild_only_affected_indexes(self):
+        rows = {
+            "skills": [
+                {"id": 1, "rarity": 1, "loc": {"en": {"name_en": "Corner Bonus"}}},
+                {"id": 2, "rarity": 3, "char": [10, 20], "loc": {"en": {"name_en": "Racing Star"}}},
+                {"id": 3, "rarity": 3, "name_en": "Inherited", "inherited": True},
+            ],
+            "character-cards": [
+                {"card_id": 10, "name_en": "Alpha", "title_en_gl": "[Classic]"},
+                {"card_id": 20, "name_en": "Beta", "title_en_gl": "[Festival]"},
+            ],
+        }
+        feeds = UmaFeeds()
+        feeds.catalog = AsyncMock(side_effect=lambda endpoint, **kwargs: rows[endpoint])
+        async with discord.Client(intents=discord.Intents.none()) as client:
+            tree = app_commands.CommandTree(client)
+            guild = discord.Object(id=1)
+            register_uma(tree, guild, feeds=feeds)
+            group = tree.get_command("uma", guild=guild)
+            shared_choices = group.get_command("skill")._params["name"].autocomplete
+            unique_choices = group.get_command("unique")._params["name"].autocomplete
+            shared = await feeds.skills(unique=False)
+            unique = await feeds.skills(unique=True)
+            self.assertEqual([choice.value for choice in await shared_choices(None, "corner")], ["1"])
+            matching = await unique_choices(None, "Beta [Festival]")
+            self.assertEqual([(choice.name, choice.value) for choice in matching], [
+                ("Racing Star — Beta [Festival] +1", "2"),
+            ])
+            self.assertEqual([choice.value for choice in await unique_choices(None, "Alpha")], ["2"])
+            self.assertEqual(list(unique.records_by_id), [2])
+            self.assertIs(await feeds.skills(unique=True), unique)
+
+            rows["character-cards"] = [{"card_id": 20, "name_en": "Beta", "title_en_gl": "[Parade]"}]
+            refreshed = await unique_choices(None, "Beta [Parade]")
+            self.assertEqual(refreshed[0].name, "Racing Star — Beta [Parade]")
+            self.assertIsNot(await feeds.skills(unique=True), unique)
+            self.assertIs(await feeds.skills(unique=False), shared)
+
+            rows["skills"] = [{"id": 4, "rarity": 1, "name_en": "Corner Bonus"}]
+            self.assertEqual([choice.value for choice in await shared_choices(None, "corner")], ["4"])
+            self.assertEqual(await unique_choices(None, "Beta"), [])
 
 
 class DigestTests(unittest.IsolatedAsyncioTestCase):

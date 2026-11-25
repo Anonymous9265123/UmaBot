@@ -15,7 +15,7 @@ from discord.ext import tasks
 
 from .alert_settings import AlertButton
 from .embeds import news_embeds, weekly_digest_embed
-from .game.feeds import FEED_TTL
+from .game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL
 
 
 log = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class UmaAlerts:
         self.released_cards = {}
         self.released_trainees = {}
         self.refresh_at = 0
+        self.news_refresh_at = 0
 
     @contextmanager
     def database(self):
@@ -334,18 +335,26 @@ class UmaAlerts:
             """).fetchall()
 
         refresh = monotonic() >= self.refresh_at
+        refresh_news = monotonic() >= self.news_refresh_at
+        checks = []
         if refresh:
-            await asyncio.gather(
-                self.check_cards(setting),
-                self.check_announcements(setting),
-                self.check_trainees(setting),
-            )
+            checks.extend((self.check_cards(setting), self.check_trainees(setting)))
+        if refresh_news:
+            checks.append(self.check_announcements(setting))
+        if checks:
+            await asyncio.gather(*checks)
+        if refresh:
             self.refresh_at = monotonic() + FEED_TTL
+        if refresh_news:
+            self.news_refresh_at = monotonic() + NEWS_TTL
 
         now = datetime.now()
         cards, events, trainees = [], [], []
         for topic, user_id, subscribed, delivery_minute in subscriptions:
-            due = refresh if delivery_minute is None else scheduled_check_time(now, delivery_minute) is not None
+            if delivery_minute is None:
+                due = refresh_news if topic == "events" else refresh
+            else:
+                due = scheduled_check_time(now, delivery_minute) is not None
             if not due:
                 continue
             row = (topic, user_id, subscribed)
@@ -387,7 +396,7 @@ class UmaAlerts:
 
     async def check_announcements(self, setting):
         posts = [
-            post for post in await self.feeds.catalog("en/news/latest/20")
+            post for post in await self.feeds.catalog(NEWS_ENDPOINT)
             if isinstance(post.get("title"), str) and isinstance(post.get("post_at"), int)
         ]
         self.store_event_announcements(posts)
@@ -405,15 +414,24 @@ class UmaAlerts:
 
     async def post_updates(self, updates, setting):
         channel_id, enabled_at = setting
-        with self.database() as db:
-            delivered = {
-                key for (key,) in db.execute("SELECT news_key FROM news_deliveries WHERE guild_id = ?", (self.guild_id,))
-            }
-        channel = self.client.get_partial_messageable(channel_id)
         now = time()
-        for posted, key, message in sorted(updates, key=lambda update: update[0]):
-            if not enabled_at < posted <= now:
-                continue
+        candidates = sorted(
+            (entry for entry in updates if enabled_at < entry[0] <= now), key=lambda entry: entry[0],
+        )
+        if not candidates:
+            return
+        keys = list(dict.fromkeys(key for _, key, _ in candidates))
+        delivered = set()
+        with self.database() as db:
+            for offset in range(0, len(keys), 900):
+                batch = keys[offset:offset + 900]
+                placeholders = ", ".join("?" for _ in batch)
+                delivered.update(key for (key,) in db.execute(
+                    f"SELECT news_key FROM news_deliveries WHERE guild_id = ? AND news_key IN ({placeholders})",
+                    (self.guild_id, *batch),
+                ))
+        channel = self.client.get_partial_messageable(channel_id)
+        for _, key, message in candidates:
             if key in delivered:
                 continue
             if self.posting_setting() != setting:

@@ -67,6 +67,8 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 
 ## Events and reminders
 
+UmaBot checks Umapyoi EN news every 15 minutes and checks support card and trainee releases hourly.
+
 - `/uma cm` shows the active EN Champions Meeting or the next one. When the EN schedule runs out, it shows a labeled GameTora preview. Search by name to look up a past cup.
 - `/uma events` shows active and upcoming EN events, limited missions, and standard banners from GameTora.
 - Use `/uma digest channel:#uma-news day:Monday delivery_time:09:00` to post a weekly summary of confirmed starts and deadlines for the next seven days. GameTora forecasts appear separately and may change. Delivery uses the bot host's local time and sends no mentions. Run `/uma digest enabled:False` to turn it off.

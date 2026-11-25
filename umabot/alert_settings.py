@@ -22,7 +22,7 @@ def alert_channel(alerts, interaction):
 def schedule_text(delivery_minute):
     clock = "" if delivery_minute is None else f"{delivery_minute // 60:02d}:{delivery_minute % 60:02d}"
     return (
-        "as soon as an hourly check detects an update"
+        "as soon as a check detects an update"
         if delivery_minute is None else f"daily at {clock} (bot host's local time)"
     )
 
@@ -267,7 +267,7 @@ class PostingDestination(discord.ui.View):
             return
         self.alerts.set_posting_channel(channel.id)
         await interaction.response.edit_message(
-            content=f"I’ll post EN news, new characters and support cards, and subscription pings in {channel.mention}. I check hourly.",
+            content=f"I’ll post updates and subscription pings in {channel.mention}. I check EN news every 15 minutes and card and trainee releases hourly.",
             view=None,
         )
         self.stop()

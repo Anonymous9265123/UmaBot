@@ -33,8 +33,8 @@ def build_url(endpoint):
     return f"{url}?{query}" if query else url
 
 
-async def fetch_record(session, url):
-    async with session.get(url, allow_redirects=False) as response:
+async def fetch_record(session, url, *, timeout, allow_redirects=False):
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout), allow_redirects=allow_redirects) as response:
         status = response.status
         if 300 <= status < 400:
             location = response.headers.get("Location")
@@ -55,7 +55,7 @@ def sns_icon_url(character):
     return None
 
 
-async def birthday_image(session, character):
+async def birthday_image(fetch, character):
     icon = sns_icon_url(character)
     if icon:
         return icon
@@ -66,24 +66,19 @@ async def birthday_image(session, character):
 
     url = build_url(f"character/{character_id}")
     try:
-        timeout = aiohttp.ClientTimeout(total=5)
-        async with session.get(url, timeout=timeout, allow_redirects=False) as response:
-            if response.status != 200:
-                return None
-            profile = await response.json(content_type=None)
+        status, profile = await fetch(url, timeout=5)
+        if status != 200:
+            return None
     except (asyncio.TimeoutError, aiohttp.ClientError, ValueError):
         return None
 
     return sns_icon_url(profile) if isinstance(profile, dict) else None
 
 
-async def related_character_data(session, category, game_id):
+async def related_character_data(fetch, category, game_id):
     url = build_url(f"{category}/character/{game_id}")
     try:
-        timeout = aiohttp.ClientTimeout(total=5)
-        async with session.get(url, timeout=timeout) as response:
-            response.raise_for_status()
-            records = await response.json(content_type=None)
+        _, records = await fetch(url, timeout=5, allow_redirects=True)
     except (asyncio.TimeoutError, aiohttp.ClientError, ValueError):
         return []
     return records if isinstance(records, list) else []
@@ -130,24 +125,16 @@ async def gametora_manifest(session):
         return await response.json(content_type=None)
 
 
-async def gametora_data(session, category, *, manifest=None):
-    if manifest is None:
-        manifest = await gametora_manifest(session)
+def gametora_version(manifest, category):
     version = manifest.get(category) if isinstance(manifest, dict) else None
-    if not isinstance(version, str) or not re.fullmatch(r"[0-9a-f]+", version):
-        raise ValueError(f"Missing GameTora catalog version for {category}")
+    return version if isinstance(version, str) and re.fullmatch(r"[0-9a-f]+", version) else None
 
+
+async def gametora_data(session, category, version):
     url = f"https://gametora.com/data/umamusume/{category}.{version}.json"
     async with session.get(url) as response:
         response.raise_for_status()
         return await response.json(content_type=None)
-
-
-async def gametora_catalog(session, category, *, manifest=None):
-    cards = await gametora_data(session, category, manifest=manifest)
-    if not isinstance(cards, list):
-        raise ValueError(f"Unexpected GameTora catalog format for {category}")
-    return cards
 
 
 def support_catalog_rows(cards):
