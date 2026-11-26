@@ -93,7 +93,7 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 | `/uma banner` | Show active EN trainee and support card banners, featured picks, and end times. |
 | `/uma upcoming` | List EN starts over the next 30 days, with a separate GameTora forecast based on the Japanese release schedule. Forecast dates and lineups can change. |
 | `/uma digest` | View or configure the weekly EN schedule digest. Requires **Manage Server**. |
-| `/uma subscriptions` | View or remove your character and support card subscriptions by category. |
+| `/uma subscriptions` | View or remove character, support card, or event announcement subscriptions in this server. |
 | `/uma alert`, `/uma reminders` | Set your alert delivery time and event reminder window, or turn deadline pings on or off. |
 | `/uma setup`, `/uma news` | Set the shared posting channel. Requires **Manage Server**. |
 | `/uma feedback` | Send feedback privately to the bot owner. |
@@ -105,7 +105,8 @@ Use **Stats** on a support card to see its game data at the level cap for each l
 - `/uma events` shows active and upcoming EN events, limited missions, and standard banners from GameTora.
 - Use `/uma digest channel:#uma-news day:Monday delivery_time:09:00` to post a weekly summary of confirmed starts and deadlines for the next seven days. GameTora forecasts appear separately and may change. Delivery uses the bot host's local time and sends no mentions. Run `/uma digest enabled:False` to turn it off.
 - Use `/uma alert` to choose a daily delivery time on the computer running UmaBot or receive alerts as soon as they qualify. Enter a custom time such as `5:30 PM` and choose how soon before an event ends to get a reminder, from 1 to 168 hours. Existing schedules keep the same clock time and follow the bot host's time zone. A scheduled reminder is sent only if the event qualifies at the chosen time, and only once per event.
-- Use `/uma reminders` to turn event deadline pings on or off. The default window is 24 hours. Server managers can use `/uma news` or `/uma setup` to select the shared posting channel.
+- Choose **Events** in `/uma subscriptions` to check or remove your subscription to new EN event announcements in this server.
+- Use `/uma reminders` to turn event-ending pings on or off. The default window is 24 hours. Server managers can use `/uma news` or `/uma setup` to select the shared posting channel.
 
 ## Data sources
 

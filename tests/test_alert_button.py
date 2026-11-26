@@ -5,9 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import discord
+from discord import app_commands
 
 from umabot.alert_settings import AlertButton, AlertPreferences
 from umabot.alerts import UmaAlerts
+from umabot.commands.lookup import register_uma
 
 
 class AlertButtonTests(unittest.IsolatedAsyncioTestCase):
@@ -75,3 +77,42 @@ class AlertButtonTests(unittest.IsolatedAsyncioTestCase):
         edit.assert_awaited_once()
         self.assertIsNone(edit.await_args.kwargs["view"])
         self.assertIn("Subscribed", edit.await_args.kwargs["content"])
+
+    async def test_events_subscription_status_and_unsubscribe_are_private_and_use_local_state(self):
+        feeds = SimpleNamespace(
+            catalog=AsyncMock(side_effect=AssertionError("Unexpected upstream request")),
+            events=AsyncMock(side_effect=AssertionError("Unexpected event request")),
+            projections=AsyncMock(side_effect=AssertionError("Unexpected forecast request")),
+        )
+        async with discord.Client(intents=discord.Intents.none()) as client:
+            tree = app_commands.CommandTree(client)
+            guild = discord.Object(id=1)
+            register_uma(tree, guild, feeds=feeds, alerts=self.alerts)
+            command = tree.get_command("uma", guild=guild).get_command("subscriptions")
+            events = next(choice for choice in command.parameters[0].choices if choice.name == "Events")
+            self.alerts.subscribe("events", 42, 20, 540)
+            self.alerts.subscribe("events", 43, 20, None)
+            self.alerts.subscribe("123", 42, 20, 540)
+            self.alerts.set_event_reminders(42, True, lead_hours=48)
+
+            await command.callback(self.interaction, events)
+            reply = self.interaction.response.send_message
+            reply.assert_awaited_once()
+            self.assertTrue(reply.await_args.kwargs["ephemeral"])
+            self.assertIn("You are subscribed", reply.await_args.args[0])
+            view = reply.await_args.kwargs["view"]
+            await view.unsubscribe.callback(self.interaction)
+            self.interaction.response.edit_message.assert_awaited_once_with(
+                content="Unsubscribed from EN event announcements in this server.", view=None,
+            )
+            self.assertFalse(self.alerts.is_subscribed("events", 42))
+            self.assertTrue(self.alerts.is_subscribed("events", 43))
+            self.assertTrue(self.alerts.is_subscribed("123", 42))
+            self.assertEqual(self.alerts.event_reminder_hours(42), 48)
+
+            reply.reset_mock()
+            await command.callback(self.interaction, events)
+            reply.assert_awaited_once_with(
+                "You are not subscribed to EN event announcements in this server.", ephemeral=True,
+            )
+            feeds.catalog.assert_not_awaited()

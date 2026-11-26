@@ -30,6 +30,20 @@ from .community import register_community
 from .feedback import register_feedback
 
 
+class EventSubscriptionView(discord.ui.View):
+    def __init__(self, alerts):
+        super().__init__(timeout=180)
+        self.alerts = alerts
+
+    @discord.ui.button(label="Unsubscribe from event announcements")
+    async def unsubscribe(self, interaction, button):
+        self.alerts.remove_preference("events", interaction.user.id)
+        await interaction.response.edit_message(
+            content="Unsubscribed from EN event announcements in this server.", view=None,
+        )
+        self.stop()
+
+
 class SubscriptionPage(discord.ui.View):
     def __init__(self, alerts, kind, prefix, entries):
         super().__init__(timeout=180)
@@ -162,12 +176,26 @@ def register_uma(tree, server, *, feeds, alerts=None, feedback=None):
         return await feeds.catalog(endpoint, timeout=2)
 
     if alerts is not None:
-        @group.command(name="subscriptions", description="View your character or support card alert subscriptions")
+        @group.command(name="subscriptions", description="View or remove character, support card, or event announcement alerts")
         @app_commands.choices(category=[
             app_commands.Choice(name="Characters", value="characters"),
             app_commands.Choice(name="Cards", value="cards"),
+            app_commands.Choice(name="Events", value="events"),
         ])
         async def subscriptions(interaction: discord.Interaction, category: app_commands.Choice[str]):
+            if category.value == "events":
+                if alerts.is_subscribed("events", interaction.user.id):
+                    await interaction.response.send_message(
+                        "You are subscribed to EN event announcements in this server.",
+                        view=EventSubscriptionView(alerts),
+                        ephemeral=True,
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "You are not subscribed to EN event announcements in this server.", ephemeral=True,
+                    )
+                return
+
             characters = category.value == "characters"
             ids = alerts.subscription_ids(interaction.user.id, characters=characters)
             kind = "character" if characters else "support card"
