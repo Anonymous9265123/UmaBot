@@ -34,6 +34,21 @@ Keep the bot process running to receive commands and send alerts. Run the same s
 
 On Windows, UmaBot saves an interactively entered token encrypted for your Windows account after a successful login. On macOS or Linux, you can enter the token at startup or supply it through `DISCORD_TOKEN`. For unattended hosting on any OS, configure `DISCORD_TOKEN` in your host's secret settings and start the bot with `python -m umabot` using the environment's Python. An environment token takes precedence over the saved Windows token.
 
+### Deploy on Fade
+
+In FadeHost, create a **Discord bot** from the UmaBot GitHub repository. Under **Settings → Build & start**, select branch `main`, use Python (auto-detect also works), leave **Build command** blank, and set **Start command** to `python -m umabot`. UmaBot requires Python 3.11 or later. FadeHost installs the root `requirements.txt` during deployment. The repository settings, build and start commands, and environment variables are saved in the dashboard for future redeploys. Check **Deploys** for GitHub auto-deploy. Saving settings can trigger a deploy, and pushes to the connected branch redeploy automatically when auto-deploy is enabled. [FadeHost Discord bot hosting](https://www.fadehost.com/docs/discord-bot-hosting/) · [FadeHost app settings](https://www.fadehost.com/docs/app-hosting/)
+
+| Environment variable | Value |
+| --- | --- |
+| `DISCORD_TOKEN` | Required. Enter the bot token in FadeHost's Discord bot token field or secret settings. |
+| `UMABOT_DATA_DIR` | Set to `/data/storage/umabot` on FadeHost to preserve SQLite data. Optional for local installs. |
+| `UMAMOE_API_KEY` | Optional secret for showing Friend ID results from uma.moe in Discord. |
+| `DISCORD_GUILD_ID` | Optional numeric server ID for a legacy single-server alert database whose server cannot be inferred. |
+
+UmaBot creates alert and feedback SQLite databases in `UMABOT_DATA_DIR`. By default it uses the repository's `data/` directory and can pick up legacy files at the repository root. FadeHost resets the checkout under `/data/app` on deploy. Its existing `/data/storage` volume survives redeploys, with no extra mount to configure. If you already have databases, stop the bot and back up the `uma-alerts*.sqlite3` and `uma-feedback.sqlite3` files before saving settings or pushing. Move the backups into `/data/storage/umabot` with their original names before starting with the new setting. [FadeHost persistent storage](https://www.fadehost.com/docs/app-hosting/#storage-what-survives-a-deploy) · [FadeHost file manager](https://www.fadehost.com/docs/app-files/)
+
+After the deployment starts, look for `UmaBot is online as` in FadeHost's live console and run `/uma help` in Discord to confirm the commands are ready. On the first deployment, use `/uma setup` to configure automated posts. After a redeploy, check `/uma subscriptions` to confirm your existing subscriptions are still present.
+
 ## Project layout
 
 - `umabot/` contains the Discord client, startup configuration, alert delivery, and embeds.
