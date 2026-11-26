@@ -20,3 +20,9 @@ def data_path(name):
     if not path.exists() and legacy_path.exists():
         return legacy_path
     return path
+
+
+def unnumbered_alert_databases():
+    name = "uma-alerts.sqlite3"
+    candidates = dict.fromkeys((data_path(name), PROJECT_ROOT / "data" / name, PROJECT_ROOT / name))
+    return [path for path in candidates if path.is_file()]

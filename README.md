@@ -8,7 +8,9 @@ UmaBot was built with help from ChatGPT and may contain mistakes. When opening a
 
 ## Latest update
 
-Use `/uma borrow find` to find Global Friend IDs for an exact EN-released support card. Hosts with an authorized uma.moe API key can show up to five listings in Discord. The command also provides a filtered website button.
+UmaBot now uses one alert database per Discord server, named `uma-alerts-<guild_id>.sqlite3`. On FadeHost, keep `UMABOT_DATA_DIR` pointed at persistent storage and remove the old `DISCORD_GUILD_ID` setting when upgrading. Existing numbered databases stay in use. If you have an older unnumbered database, see [Migrate an older alert database](#migrate-an-older-alert-database).
+
+Alert buttons now confirm subscriptions for users with a saved schedule. First-time subscribers still get the schedule picker.
 
 ## Run your own UmaBot
 
@@ -43,24 +45,32 @@ In FadeHost, create a **Discord bot** from the UmaBot GitHub repository. Under *
 | `DISCORD_TOKEN` | Required. Enter the bot token in FadeHost's Discord bot token field or secret settings. |
 | `UMABOT_DATA_DIR` | Set to `/data/storage/umabot` on FadeHost to preserve SQLite data. Optional for local installs. |
 | `UMAMOE_API_KEY` | Optional secret for showing Friend ID results from uma.moe in Discord. |
-| `DISCORD_GUILD_ID` | Optional numeric server ID for a legacy single-server alert database whose server cannot be inferred. |
 
-UmaBot creates alert and feedback SQLite databases in `UMABOT_DATA_DIR`. By default it uses the repository's `data/` directory and can pick up legacy files at the repository root. FadeHost resets the checkout under `/data/app` on deploy. Its existing `/data/storage` volume survives redeploys, with no extra mount to configure. If you already have databases, stop the bot and back up the `uma-alerts*.sqlite3` and `uma-feedback.sqlite3` files before saving settings or pushing. Move the backups into `/data/storage/umabot` with their original names before starting with the new setting. [FadeHost persistent storage](https://www.fadehost.com/docs/app-hosting/#storage-what-survives-a-deploy) · [FadeHost file manager](https://www.fadehost.com/docs/app-files/)
+`UMABOT_DATA_DIR` selects the folder. The Discord server ID determines the alert filename, `uma-alerts-<guild_id>.sqlite3`. Feedback stays in `uma-feedback.sqlite3` in the same folder. FadeHost resets the checkout under `/data/app` on deploy, and its existing `/data/storage` volume survives redeploys. If your numbered databases already work in persistent storage, keep the directory setting and remove `DISCORD_GUILD_ID` when upgrading. UmaBot no longer uses it. If you are moving existing databases into persistent storage, stop the bot, back up the files, and copy the numbered alert and feedback databases into the folder where the corresponding destination files are absent. For an unnumbered file, follow the migration steps below. [FadeHost persistent storage](https://www.fadehost.com/docs/app-hosting/#storage-what-survives-a-deploy) · [FadeHost file manager](https://www.fadehost.com/docs/app-files/)
 
 After the deployment starts, look for `UmaBot is online as` in FadeHost's live console and run `/uma help` in Discord to confirm the commands are ready. On the first deployment, use `/uma setup` to configure automated posts. After a redeploy, check `/uma subscriptions` to confirm your existing subscriptions are still present.
+
+### Migrate an older alert database
+
+Older installations may have an unnumbered `uma-alerts.sqlite3` in the configured storage folder, the repository's `data/` folder, or the repository root. UmaBot leaves it in place and logs a startup notice when it finds one.
+
+1. Stop the bot and back up the unnumbered database and any numbered databases before upgrading or copying files. Use a SQLite backup tool if you cannot stop the old instance.
+2. Identify the server that owns the old data. Inspect the backup read-only for the guild ID in `news_settings` or `news_deliveries`. An old `DISCORD_GUILD_ID` or `discord-guild-id.txt` is also a clue. Verify the ID using **Copy Server ID** in Discord with Developer Mode enabled. If ownership is unclear, keep the backup and pause the migration.
+3. If `uma-alerts-<guild_id>.sqlite3` is absent, copy the backup under that name into `UMABOT_DATA_DIR` or, for a default local setup, the repository's `data/` folder. For local setups, also check the repository root for an existing numbered file. If both the unnumbered and numbered files exist, inspect separate copies of each before deciding whether any data needs to move. Keep the existing numbered database in place.
+4. Remove the old `DISCORD_GUILD_ID` setting when upgrading, start the bot, and verify the posting channel with `/uma setup` and subscriptions with `/uma subscriptions`.
 
 ## Project layout
 
 - `umabot/` contains the Discord client, startup configuration, alert delivery, and embeds.
 - `umabot/commands/` contains the slash commands.
 - `umabot/game/` contains the game data clients, shared feed cache, and condition formatting.
-- `data/` is created as needed for new databases and ignored by Git. Existing databases in the repository root are picked up in place.
+- `data/` is created as needed for new databases and ignored by Git. With no `UMABOT_DATA_DIR` set, an existing numbered alert database or feedback database at the repository root is used when its counterpart in `data/` is absent.
 
-The original `python uma_bot.py` launcher still works. Existing Windows token files are read from the repository root.
+Start UmaBot with `python -m umabot` from your virtual environment. Existing Windows token files are read from the repository root.
 
 ## Using the bot
 
-UmaBot registers `/uma` in each server it joins. Run `/uma setup` in each server that wants automated posts and pings. Each server has its own posting channel and subscriptions. Existing single-server installations can use their old `DISCORD_GUILD_ID` to associate the legacy database with that server if UmaBot cannot identify the server from the database.
+UmaBot registers `/uma` in each server it joins. Run `/uma setup` in each server that wants automated posts and pings. Each server has its own posting channel and subscriptions.
 
 Run `/uma ping` to mention yourself in the current channel and measure how long UmaBot takes to reply. Use `/uma help` for the full command list.
 

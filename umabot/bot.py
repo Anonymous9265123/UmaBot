@@ -12,9 +12,9 @@ from discord import app_commands
 from .alerts import AlertButton, UmaAlerts
 from .commands.feedback import FeedbackInbox
 from .commands.lookup import register_uma
-from .config import legacy_guild_id, save_discord_token, startup_settings
+from .config import save_discord_token, startup_settings
 from .game.feeds import UmaFeeds
-from .paths import data_path
+from .paths import data_path, unnumbered_alert_databases
 from .stats import StatsButton
 
 
@@ -22,12 +22,11 @@ log = logging.getLogger(__name__)
 
 
 class UmaBot(discord.Client):
-    def __init__(self, legacy_server_id=None):
+    def __init__(self):
         super().__init__(
             intents=discord.Intents.default(),
             allowed_mentions=discord.AllowedMentions.none(),
         )
-        self.legacy_server_id = legacy_server_id
         self.feeds = UmaFeeds()
         self.feedback = FeedbackInbox(data_path("uma-feedback.sqlite3"))
         self.alerts_by_guild = {}
@@ -37,6 +36,13 @@ class UmaBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        unnumbered = unnumbered_alert_databases()
+        if unnumbered:
+            log.warning(
+                "UmaBot found unused unnumbered alert databases at %s. "
+                "See README.md under 'Migrate an older alert database' before copying any data.",
+                ", ".join(str(path) for path in unnumbered),
+            )
         self.add_dynamic_items(AlertButton, StatsButton)
         self.feedback.path.parent.mkdir(parents=True, exist_ok=True)
         self.feedback.initialize()
@@ -48,8 +54,7 @@ class UmaBot(discord.Client):
         self.syncing_guilds.add(guild_id)
         try:
             if guild_id not in self.alerts_by_guild:
-                filename = "uma-alerts.sqlite3" if guild_id == self.legacy_server_id else f"uma-alerts-{guild_id}.sqlite3"
-                path = data_path(filename)
+                path = data_path(f"uma-alerts-{guild_id}.sqlite3")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 alerts = UmaAlerts(self, guild_id, path, self.feeds)
                 alerts.start()
@@ -95,7 +100,7 @@ class UmaBot(discord.Client):
 
 async def run_bot():
     token, setup_token = startup_settings()
-    async with UmaBot(legacy_guild_id()) as bot:
+    async with UmaBot() as bot:
         await bot.login(token)
         try:
             if setup_token and os.name == "nt":

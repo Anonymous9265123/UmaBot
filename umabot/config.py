@@ -1,16 +1,13 @@
-"""Load the Discord token and associate an existing single-server database."""
+"""Load the Discord token for startup."""
 
 import os
-import sqlite3
 import subprocess
 import sys
-from contextlib import closing
 from getpass import getpass
 
-from .paths import PROJECT_ROOT, data_path
+from .paths import PROJECT_ROOT
 
 
-GUILD_FILE = PROJECT_ROOT / "discord-guild-id.txt"
 TOKEN_FILE = PROJECT_ROOT / "discord-token.txt"
 
 
@@ -60,28 +57,6 @@ def save_discord_token(token):
     if result.returncode != 0 or not encrypted:
         raise OSError("Could not encrypt the Discord bot token.")
     TOKEN_FILE.write_text(encrypted + "\n", encoding="ascii")
-
-
-def valid_guild_id(value):
-    return value.isascii() and value.isdecimal() and len(value) <= 20 and 0 < int(value) < 2**64
-
-
-def legacy_guild_id():
-    legacy_database = data_path("uma-alerts.sqlite3")
-    if legacy_database.is_file():
-        try:
-            with closing(sqlite3.connect(f"{legacy_database.as_uri()}?mode=ro", uri=True)) as db:
-                guilds = db.execute(
-                    "SELECT guild_id FROM news_settings UNION SELECT guild_id FROM news_deliveries LIMIT 2"
-                ).fetchall()
-            if len(guilds) == 1:
-                return guilds[0][0]
-        except sqlite3.Error:
-            pass
-    guild_id = os.getenv("DISCORD_GUILD_ID", "").strip()
-    if not guild_id and GUILD_FILE.is_file():
-        guild_id = GUILD_FILE.read_text(encoding="utf-8").strip()
-    return int(guild_id) if valid_guild_id(guild_id) else None
 
 
 def startup_settings():
