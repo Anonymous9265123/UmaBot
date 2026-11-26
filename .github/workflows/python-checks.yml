@@ -34,10 +34,12 @@ jobs:
       - name: Run the setup installer
         run: python setup_umabot.py --install-only
       - name: Install development tools
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
         run: ${{ matrix.venv_python }} -m pip install -r requirements-dev.txt
       - name: Check dependency compatibility
         run: ${{ matrix.venv_python }} -m pip check
       - name: Lint Python sources
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
         run: ${{ matrix.venv_python }} -m ruff check .
       - name: Compile Python sources
         run: ${{ matrix.venv_python }} -m compileall -q uma_bot.py umabot

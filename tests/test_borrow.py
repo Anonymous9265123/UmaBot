@@ -9,7 +9,6 @@ from urllib.parse import parse_qs, urlsplit
 import discord
 from discord import app_commands
 
-from umabot.commands.borrow import trainer_search_url
 from umabot.commands.lookup import register_uma
 from umabot.game.feeds import UmaFeeds
 
@@ -47,19 +46,13 @@ class BorrowTests(unittest.IsolatedAsyncioTestCase):
             edit_original_response=AsyncMock(),
         )
 
-    def test_link_matches_the_public_example(self):
-        self.assertEqual(
-            trainer_search_url(30014, 4),
-            "https://uma.moe/database?filters=eyJzYyI6IjMwMDE0IiwibGIiOjR9",
-        )
-
     async def test_autocomplete_keeps_cards_distinct_and_links_use_exact_id_and_min_lb(self):
         autocomplete = self.find._params["card"].autocomplete
         self.assertIs(autocomplete, self.support._params["name"].autocomplete)
         choices = await autocomplete(None, "Same Trainee")
         self.assertEqual({choice.value for choice in choices}, {"30014", "30015"})
-        for card, limit_break in (("30014", None), ("30015", 3)):
-            with self.subTest(card=card):
+        for card, limit_break in (("30014", None), ("30015", 3), ("30014", 4)):
+            with self.subTest(card=card, limit_break=limit_break):
                 if limit_break is None:
                     await self.find.callback(self.interaction, card)
                 else:
@@ -67,6 +60,11 @@ class BorrowTests(unittest.IsolatedAsyncioTestCase):
                 reply = self.interaction.edit_original_response.await_args.kwargs
                 button, = reply["view"].children
                 self.assertEqual(button.label, "Find trainers on uma.moe")
+                if card == "30014" and limit_break == 4:
+                    self.assertEqual(
+                        button.url,
+                        "https://uma.moe/database?filters=eyJzYyI6IjMwMDE0IiwibGIiOjR9",
+                    )
                 link = urlsplit(button.url)
                 self.assertEqual((link.scheme, link.netloc, link.path), ("https", "uma.moe", "/database"))
                 filters = json.loads(b64decode(parse_qs(link.query)["filters"][0]))
