@@ -93,6 +93,8 @@ class AlertButton(
             message = subscription_confirmation(self.topic, channel, delivery_minute)
         if trainee:
             await interaction.edit_original_response(content=message, view=view)
+        elif view is None:
+            await interaction.response.send_message(message, ephemeral=True)
         else:
             await interaction.response.send_message(message, view=view, ephemeral=True)
 
