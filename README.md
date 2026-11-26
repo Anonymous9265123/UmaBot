@@ -38,6 +38,8 @@ On Windows, UmaBot saves an interactively entered token encrypted for your Windo
 
 ### Deploy on Fade
 
+UmaBot has been deployed successfully on FadeHost using `python -m umabot` as the start command.
+
 In FadeHost, create a **Discord bot** from the UmaBot GitHub repository. Under **Settings → Build & start**, select branch `main`, use Python (auto-detect also works), leave **Build command** blank, and set **Start command** to `python -m umabot`. UmaBot requires Python 3.11 or later. FadeHost installs the root `requirements.txt` during deployment. The repository settings, build and start commands, and environment variables are saved in the dashboard for future redeploys. Check **Deploys** for GitHub auto-deploy. Saving settings can trigger a deploy, and pushes to the connected branch redeploy automatically when auto-deploy is enabled. [FadeHost Discord bot hosting](https://www.fadehost.com/docs/discord-bot-hosting/) · [FadeHost app settings](https://www.fadehost.com/docs/app-hosting/)
 
 | Environment variable | Value |
