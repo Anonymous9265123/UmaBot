@@ -124,23 +124,20 @@ def article_preview(body, limit=750):
     return excerpt.rstrip() + "…"
 
 
-def news_embeds(posts):
-    embeds = []
-    for post in posts:
-        title = post.get("title") or "Untitled announcement"
-        body = plain_text(post.get("message") or "")
-        details = str(post.get("label_name_en") or "EN news")[:200]
-        timestamp = post.get("post_at")
-        if isinstance(timestamp, int):
-            details += f" · <t:{timestamp}:f>"
+def news_embed(post):
+    title = post.get("title") or "Untitled announcement"
+    body = plain_text(post.get("message") or "")
+    details = str(post.get("label_name_en") or "EN news")[:200]
+    timestamp = post.get("post_at")
+    if isinstance(timestamp, int):
+        details += f" · <t:{timestamp}:f>"
 
-        preview = article_preview(body) or "No article text supplied."
-        embeds.append(discord.Embed(
-            title=title[:256],
-            description=f"{details}\n\n{preview}",
-            color=0x58A65C,
-        ))
-    return embeds
+    preview = article_preview(body) or "No article text supplied."
+    return discord.Embed(
+        title=title[:256],
+        description=f"{details}\n\n{preview}",
+        color=0x58A65C,
+    )
 
 
 SKILL_EFFECT_LABELS = {27: "Target Speed", 28: "Acceleration", 31: "Lane Movement Speed"}

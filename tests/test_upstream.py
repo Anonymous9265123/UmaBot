@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import tempfile
 import unittest
 from collections import Counter, deque
@@ -6,7 +7,7 @@ from contextlib import asynccontextmanager, contextmanager
 from email.utils import formatdate
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import aiohttp
 import discord
@@ -448,3 +449,37 @@ class NewsTests(unittest.IsolatedAsyncioTestCase):
         selects = [query for query in self.queries if "SELECT news_key FROM news_deliveries" in query]
         self.assertEqual(len(selects), 1)
         self.assertIn("news_key IN ('ready')", selects[0])
+
+    async def test_event_without_provider_id_keeps_reminder_and_delivery_keys_after_restart(self):
+        setting = (2, 100)
+        title = "New story event: Race Day"
+        old_title = "New story event: Earlier Race"
+        key = f"120:{title}"
+        self.alerts.posting_setting = lambda: setting
+        catalog = AsyncMock(return_value=[
+            {"id": 0, "title": title, "post_at": 120, "message": "<p>Race day details</p>"},
+            {"title": old_title, "post_at": 100},
+        ])
+        self.alerts.feeds.catalog = catalog
+        with patch("umabot.alerts.time", return_value=150):
+            await self.alerts.check_announcements(setting)
+            restarted = UmaAlerts(self.alerts.client, 1, self.alerts.path, self.alerts.feeds)
+            with patch.object(type(restarted.poll), "start"):
+                restarted.start()
+            restarted.posting_setting = lambda: setting
+            await restarted.check_announcements(setting)
+
+        self.assertEqual(catalog.await_args_list, [call(NEWS_ENDPOINT)] * 2)
+        self.send.assert_awaited_once()
+        message = self.send.await_args.kwargs
+        self.assertEqual(message["embed"].title, title)
+        self.assertEqual(message["embed"].description, "EN news · <t:120:f>\n\nRace day details")
+        self.assertEqual([item.custom_id for item in message["view"].children], ["uma-alert:events"])
+        with restarted.database() as db:
+            self.assertEqual(db.execute("SELECT news_key FROM news_deliveries").fetchall(), [(key,)])
+            self.assertEqual(db.execute(
+                "SELECT event_key, title, posted_at FROM event_announcements ORDER BY posted_at"
+            ).fetchall(), [
+                (hashlib.sha256(f"100:{old_title}".encode()).hexdigest(), old_title, 100),
+                (hashlib.sha256(key.encode()).hexdigest(), title, 120),
+            ])

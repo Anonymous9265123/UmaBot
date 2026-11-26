@@ -14,7 +14,7 @@ import discord
 from discord.ext import tasks
 
 from .alert_settings import AlertButton
-from .embeds import news_embeds, weekly_digest_embed
+from .embeds import news_embed, weekly_digest_embed
 from .game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL
 
 
@@ -395,21 +395,29 @@ class UmaAlerts:
             await self.deliver(recipients, messages[topic], topic=topic)
 
     async def check_announcements(self, setting):
-        posts = [
-            post for post in await self.feeds.catalog(NEWS_ENDPOINT)
-            if isinstance(post.get("title"), str) and isinstance(post.get("post_at"), int)
-        ]
-        self.store_event_announcements(posts)
-        await self.post_news(posts, setting)
+        announcements = []
+        prepared = []
+        for post in await self.feeds.catalog(NEWS_ENDPOINT):
+            title, posted = post.get("title"), post.get("post_at")
+            if not isinstance(title, str) or not isinstance(posted, int):
+                continue
+            key = str(post.get("id") or f"{posted}:{title}")
+            is_event = EVENT_TITLE.search(title) is not None
+            if is_event:
+                event_key = hashlib.sha256(key.encode()).hexdigest()
+                announcements.append((event_key, title, posted))
+            prepared.append((posted, key, post, is_event))
 
-    async def post_news(self, posts, setting):
+        # Record events independently of news delivery eligibility.
+        with self.database() as db:
+            db.executemany("INSERT OR IGNORE INTO event_announcements VALUES (?, ?, ?)", announcements)
+
         updates = []
-        for post, embed in zip(posts, news_embeds(posts)):
-            posted, title = post["post_at"], post["title"]
-            message = {"embed": embed}
-            if EVENT_TITLE.search(title):
+        for posted, key, post, is_event in prepared:
+            message = {"embed": news_embed(post)}
+            if is_event:
                 message["view"] = self.view("events")
-            updates.append((posted, str(post.get("id") or f"{posted}:{title}"), message))
+            updates.append((posted, key, message))
         await self.post_updates(updates, setting)
 
     async def post_updates(self, updates, setting):
@@ -444,19 +452,6 @@ class UmaAlerts:
             delivered.add(key)
             with self.database() as db:
                 db.execute("INSERT OR IGNORE INTO news_deliveries VALUES (?, ?)", (self.guild_id, key))
-
-    def store_event_announcements(self, posts):
-        announcements = []
-        for post in posts:
-            title, posted = post["title"], post["post_at"]
-            if not EVENT_TITLE.search(title):
-                continue
-            identity = post.get("id") or f"{posted}:{title}"
-            event_key = hashlib.sha256(str(identity).encode()).hexdigest()
-            announcements.append((event_key, title, posted))
-
-        with self.database() as db:
-            db.executemany("INSERT OR IGNORE INTO event_announcements VALUES (?, ?, ?)", announcements)
 
     async def check_events(self, due):
         if not due:

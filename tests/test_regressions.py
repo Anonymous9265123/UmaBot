@@ -14,7 +14,7 @@ from umabot.game.calendar import CM_CATALOG, CM_FORECAST_CATALOG
 from umabot.game.feeds import UmaFeeds
 from umabot.game.racetracks import track_search
 from umabot.game.search import NameSearch
-from umabot.stats import StatsButton, SupportComparisonView
+from umabot.stats import StatsButton, SupportComparisonView, SupportStatsView, support_comparison
 
 
 class AlertScheduleTests(unittest.TestCase):
@@ -207,6 +207,34 @@ class ComparisonTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offsets, sorted(offsets))
         self.assertIn("A **15** | B 5", description)
         self.assertIn("A 0 | B 0", description)
+
+    async def test_support_views_share_label_fallbacks_and_keep_their_formatting(self):
+        english = {
+            "support_id": 123, "rarity": 3, "effects": [],
+            "name_en_gl": "English Name", "char_name": "Other Name",
+            "title_en": "English *Title*", "title_ja": "別の題名",
+        }
+        fallback = {
+            "support_id": 456, "rarity": 2, "effects": [],
+            "name_en_gl": "", "char_name": "Character_Name",
+            "title_en": "", "title_ja": "日本語の題名",
+        }
+        cards = (english, fallback)
+        compare = SupportComparisonView(cards, (4, 4), {}, 1)
+        headings = compare.effects_embed().description.splitlines()
+        details = support_comparison(cards, (4, 4), {})
+        for index, (name, title, rarity, level) in enumerate((
+            ("English Name", "English *Title*", "SSR", 50),
+            ("Character_Name", "日本語の題名", "SR", 45),
+        )):
+            with self.subTest(name=name):
+                stats = SupportStatsView(cards[index], {}).embed(4)
+                self.assertEqual(stats.title, f"{name} · Support stats")
+                self.assertEqual(stats.description, f"{title} · {rarity} · 4LB · Lv {level}")
+                self.assertEqual(details.fields[index].name, name)
+                self.assertEqual(details.fields[index].value.splitlines()[1], discord.utils.escape_markdown(title))
+                label = discord.utils.escape_markdown(f"{name} · {title}")
+                self.assertEqual(headings[index], f"**{'AB'[index]}** {label} · 4LB · Lv {level}")
 
     async def test_stats_button_uses_card_level_and_effect_definitions(self):
         card = {"support_id": 123, "char_name": "Test Trainee", "rarity": 2, "effects": [[1, 5]]}

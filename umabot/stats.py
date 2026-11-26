@@ -23,13 +23,18 @@ def support_card_url(card):
     return build_url(f"support/{card['support_id']}/gametora")
 
 
+def support_card_labels(card):
+    name = card.get("name_en_gl") or card.get("char_name") or "Support card"
+    title = card.get("title_en") or card.get("title_ja")
+    return name, title
+
+
 def support_comparison(cards, limit_breaks, definitions):
     """Show the active and unique effects at each selected level cap."""
     embed = discord.Embed(title="Support card comparison", color=0x58A65C)
     for card, limit_break in zip(cards, limit_breaks, strict=True):
         level = support_level(card, limit_break)
-        name = card.get("name_en_gl") or card.get("char_name") or "Support card"
-        title = card.get("title_en") or card.get("title_ja")
+        name, title = support_card_labels(card)
         rarity = {1: "R", 2: "SR", 3: "SSR"}[card["rarity"]]
         url = support_card_url(card)
         active, _ = support_effects(card, level, definitions)
@@ -68,8 +73,7 @@ class SupportComparisonView(discord.ui.View):
         values = []
         for label, card, limit_break in zip(("A", "B"), self.cards, self.limit_breaks, strict=True):
             level = support_level(card, limit_break)
-            name = card.get("name_en_gl") or card.get("char_name") or "Support card"
-            title = card.get("title_en") or card.get("title_ja")
+            name, title = support_card_labels(card)
             name = discord.utils.escape_markdown(f"{name} · {title}" if title else name)[:130]
             headings.append(f"**{label}** {name} · {limit_break}LB · Lv {level}")
             values.append({effect_id: value for effect_id, value, _ in support_effect_values(card, level)})
@@ -132,8 +136,7 @@ class SupportStatsView(discord.ui.View):
 
     def embed(self, limit_break):
         level = support_level(self.card, limit_break)
-        name = self.card.get("name_en_gl") or self.card.get("char_name") or "Support card"
-        title = self.card.get("title_en") or self.card.get("title_ja")
+        name, title = support_card_labels(self.card)
         rarity = {1: "R", 2: "SR", 3: "SSR"}[self.card["rarity"]]
         details = [item for item in (title, rarity, f"{limit_break}LB", f"Lv {level}") if item]
         embed = discord.Embed(
