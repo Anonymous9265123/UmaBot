@@ -414,8 +414,15 @@ class UmaAlerts:
             await self.deliver(recipients, messages[topic], topic=topic)
 
     async def check_announcements(self, setting):
+        def render(post_and_event):
+            post, is_event = post_and_event
+            message = {"embed": news_embed(post)}
+            if is_event:
+                message["view"] = self.view("events")
+            return message
+
         announcements = []
-        prepared = []
+        updates = []
         for post in await self.feeds.catalog(NEWS_ENDPOINT):
             title, posted = post.get("title"), post.get("post_at")
             if not isinstance(title, str) or not isinstance(posted, int):
@@ -425,21 +432,15 @@ class UmaAlerts:
             if is_event:
                 event_key = hashlib.sha256(key.encode()).hexdigest()
                 announcements.append((event_key, title, posted))
-            prepared.append((posted, key, post, is_event))
+            updates.append((posted, key, (post, is_event)))
 
         # Record events independently of news delivery eligibility.
         with self.database() as db:
             db.executemany("INSERT OR IGNORE INTO event_announcements VALUES (?, ?, ?)", announcements)
 
-        updates = []
-        for posted, key, post, is_event in prepared:
-            message = {"embed": news_embed(post)}
-            if is_event:
-                message["view"] = self.view("events")
-            updates.append((posted, key, message))
-        await self.post_updates(updates, setting)
+        await self.post_updates(updates, setting, render=render)
 
-    async def post_updates(self, updates, setting):
+    async def post_updates(self, updates, setting, *, render=None):
         channel_id, enabled_at = setting
         now = time()
         candidates = sorted(
@@ -458,12 +459,13 @@ class UmaAlerts:
                     (self.guild_id, *batch),
                 ))
         channel = self.client.get_partial_messageable(channel_id)
-        for _, key, message in candidates:
+        for _, key, payload in candidates:
             if key in delivered:
                 continue
             if self.posting_setting() != setting:
                 log.info("Skipped an update in server %s because its posting channel changed", self.guild_id)
                 return
+            message = render(payload) if render is not None else payload
             try:
                 await channel.send(**message)
             except discord.HTTPException:

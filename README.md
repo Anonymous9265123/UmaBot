@@ -8,9 +8,9 @@ UmaBot was built with help from ChatGPT and may contain mistakes. When opening a
 
 ## Latest update
 
-UmaBot now uses one alert database per Discord server, named `uma-alerts-<guild_id>.sqlite3`. On FadeHost, keep `UMABOT_DATA_DIR` pointed at persistent storage and remove the old `DISCORD_GUILD_ID` setting when upgrading. Existing numbered databases stay in use. If you have an older unnumbered database, see [Migrate an older alert database](#migrate-an-older-alert-database).
-
-Alert buttons now confirm subscriptions for users with a saved schedule. First-time subscribers still get the schedule picker.
+- Choose **Events** in `/uma subscriptions` to check or remove your EN event announcement subscription. Successful subscription confirmations point you there and to the original alert button.
+- UmaBot builds EN news embeds and event buttons only for posts it is about to send.
+- Support card lookups use the same EN release status for the display and the alert button. The **Stats** button remains available.
 
 ## Run your own UmaBot
 

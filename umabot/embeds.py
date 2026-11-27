@@ -313,8 +313,7 @@ def character_embed(profile, outfits=(), support_cards=(), release_status="Unkno
     return embed
 
 
-def support_embed(record, details=None):
-    details = details or {}
+def support_embed(record, details, *, release_status):
     character = details.get("char_name") or support_character_name(record) or "Support card"
     card_name = (
         record.get("title_en") or details.get("title_en")
@@ -330,8 +329,7 @@ def support_embed(record, details=None):
         title=character[:256], description="\n".join(description) or None,
         url=url, color=0x58A65C,
     )
-    status = en_release_status({**record, **details})
-    embed.add_field(name="EN release", value=status)
+    embed.add_field(name="EN release", value=release_status)
     image = next(
         (record[key] for key in ("image_url", "image", "thumb_img")
          if isinstance(record.get(key), str) and record[key].startswith(("https://", "http://"))),

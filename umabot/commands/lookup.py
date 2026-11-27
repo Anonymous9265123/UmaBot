@@ -10,6 +10,7 @@ from ..alert_settings import AlertPreferences, PostingDestination
 from ..game.api import (
     birthday_image,
     build_url,
+    en_release_status,
     related_character_data,
     support_character_name,
     support_name,
@@ -155,11 +156,12 @@ async def lookup(
         return
 
     if support_metadata is not None and isinstance(data, dict):
-        embed = support_embed(data, support_metadata)
+        release_status = en_release_status({**data, **support_metadata})
+        embed = support_embed(data, support_metadata, release_status=release_status)
         card_id = data.get("id")
         view = None
         if isinstance(card_id, int):
-            view = alerts.view(card_id) if alerts and embed.fields[0].value != "Released" else discord.ui.View(timeout=None)
+            view = alerts.view(card_id) if alerts and release_status != "Released" else discord.ui.View(timeout=None)
             view.add_item(StatsButton(card_id))
         await interaction.edit_original_response(embed=embed, view=view)
         return

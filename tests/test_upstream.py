@@ -15,6 +15,7 @@ import discord
 from umabot.alerts import UmaAlerts
 from umabot.bot import UmaBot
 from umabot.commands.lookup import lookup, register_uma
+from umabot.embeds import news_embed
 from umabot.game.api import build_url
 from umabot.game.feeds import FEED_TTL, NEWS_ENDPOINT, NEWS_TTL, RETRY_DELAY, UmaFeeds
 from umabot.game.upstream import HostBudget, UMAPYOI_LIMITS, UpstreamCooldown
@@ -72,6 +73,28 @@ class BlockingResponse(MockResponse):
 
 
 class UpstreamTests(unittest.IsolatedAsyncioTestCase):
+    async def test_support_lookup_uses_merged_release_status_for_embed_and_buttons(self):
+        record = {"id": 123, "release_en": "2000-01-01"}
+        for release, expected, buttons in (
+            ("2000-01-01", "Released", ["uma-stats:123"]),
+            ("2999-01-01", "Unreleased", ["uma-alert:123", "uma-stats:123"]),
+            ("unknown", "Unknown", ["uma-alert:123", "uma-stats:123"]),
+        ):
+            with self.subTest(status=expected):
+                interaction = SimpleNamespace(
+                    response=SimpleNamespace(is_done=lambda: True),
+                    client=SimpleNamespace(feeds=SimpleNamespace(record=AsyncMock(return_value=(200, record)))),
+                    edit_original_response=AsyncMock(),
+                )
+                await lookup(
+                    interaction, "support/123", "Support card details",
+                    support_metadata={"release_en": release}, alerts=SimpleNamespace(view=UmaAlerts.view),
+                )
+                reply = interaction.edit_original_response.await_args.kwargs
+                fields = {field.name: field.value for field in reply["embed"].fields}
+                self.assertEqual(fields["EN release"], expected)
+                self.assertEqual([item.custom_id for item in reply["view"].children], buttons)
+
     async def asyncSetUp(self):
         self.now = 100.0
         self.epoch = 1_800_000_000
@@ -432,20 +455,27 @@ class NewsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_news_posts_once_with_original_embed_and_queries_candidate_keys_only(self):
         setting = (2, 100)
+        ready = {"id": "ready", "title": "New EN event announcement", "post_at": 120}
         self.alerts.posting_setting = lambda: setting
         self.alerts.feeds.catalog = AsyncMock(return_value=[
             {"id": "old", "title": "Old", "post_at": 100},
-            {"id": "ready", "title": "New EN event", "post_at": 120},
-            {"id": "ready", "title": "New EN event", "post_at": 120},
+            ready,
+            ready.copy(),
             {"id": "future", "title": "Future", "post_at": 180},
         ])
-        with patch("umabot.alerts.time", return_value=150):
+        with (
+            patch("umabot.alerts.time", return_value=150),
+            patch("umabot.alerts.news_embed", wraps=news_embed) as render,
+            patch.object(UmaAlerts, "view", wraps=UmaAlerts.view) as build_button,
+        ):
             await self.alerts.check_announcements(setting)
             restarted = UmaAlerts(self.alerts.client, 1, self.alerts.path, self.alerts.feeds)
             restarted.posting_setting = lambda: setting
             await restarted.check_announcements(setting)
+        render.assert_called_once_with(ready)
+        build_button.assert_called_once_with("events")
         self.send.assert_awaited_once()
-        self.assertEqual(self.send.await_args.kwargs["embed"].title, "New EN event")
+        self.assertEqual(self.send.await_args.kwargs["embed"].title, ready["title"])
         selects = [query for query in self.queries if "SELECT news_key FROM news_deliveries" in query]
         self.assertEqual(len(selects), 1)
         self.assertIn("news_key IN ('ready')", selects[0])

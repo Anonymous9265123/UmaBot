@@ -42,6 +42,8 @@ class AlertButtonTests(unittest.IsolatedAsyncioTestCase):
         reply.assert_awaited_once()
         self.assertEqual(reply.await_args.kwargs, {"ephemeral": True})
         self.assertIn("daily at 09:00", reply.await_args.args[0])
+        self.assertIn("/uma subscriptions", reply.await_args.args[0])
+        self.assertIn("original alert button", reply.await_args.args[0])
 
         reply.reset_mock()
         await button.callback(self.interaction)

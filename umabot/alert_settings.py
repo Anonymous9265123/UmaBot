@@ -27,13 +27,11 @@ def schedule_text(delivery_minute):
     )
 
 
-def subscription_confirmation(topic, channel, delivery_minute):
-    unsubscribe = "Click the alert button again to unsubscribe."
-    if topic != "events":
-        unsubscribe = "Use `/uma subscriptions` or click the alert button again to unsubscribe."
+def subscription_confirmation(channel, delivery_minute):
     return (
         f"Subscribed. I’ll ping you in {channel.mention} {schedule_text(delivery_minute)}. "
-        f"Use `/uma alert` to change your alert schedule. {unsubscribe}"
+        "Use `/uma alert` to change your schedule. Manage your subscription in `/uma subscriptions` "
+        "or click the original alert button again to unsubscribe."
     )
 
 
@@ -90,7 +88,7 @@ class AlertButton(
             message = view.prompt
         else:
             delivery_minute = alerts.subscribe(self.topic, user_id, channel.id, schedule[0])
-            message = subscription_confirmation(self.topic, channel, delivery_minute)
+            message = subscription_confirmation(channel, delivery_minute)
         if trainee:
             await interaction.edit_original_response(content=message, view=view)
         elif view is None:
@@ -230,7 +228,7 @@ class AlertPreferences(discord.ui.View):
                 await interaction.response.send_message(str(error), ephemeral=True)
                 return
             delivery_minute = self.alerts.subscribe(self.topic, user_id, channel.id, self.delivery_minute)
-            message = subscription_confirmation(self.topic, channel, delivery_minute)
+            message = subscription_confirmation(channel, delivery_minute)
         await interaction.response.edit_message(
             content=message,
             view=None,
