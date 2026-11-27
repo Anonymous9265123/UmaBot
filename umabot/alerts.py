@@ -199,6 +199,10 @@ class UmaAlerts:
                     "ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id",
                     (self.guild_id, channel_id, time()),
                 )
+        if channel_id is None:
+            log.info("Automatic news and subscription pings disabled in server %s", self.guild_id)
+        else:
+            log.info("Automatic posting configured in server %s for channel %s", self.guild_id, channel_id)
 
     def event_reminder_hours(self, user_id):
         with self.database() as db:
@@ -255,12 +259,19 @@ class UmaAlerts:
             try:
                 await send_user_ping(channel, batch, text)
             except discord.HTTPException:
-                log.warning("Could not post event reminder", exc_info=True)
+                log.warning(
+                    "Could not send an event-ending reminder in server %s to channel %s",
+                    self.guild_id, setting[0], exc_info=True,
+                )
                 return
             with self.database() as db:
                 db.executemany("INSERT OR IGNORE INTO reminder_deliveries VALUES ('events', ?, ?)", [
                     (event.key, user_id) for user_id in batch
                 ])
+            log.info(
+                "Sent an event-ending reminder in server %s to channel %s (%d recipients)",
+                self.guild_id, setting[0], len(batch),
+            )
 
     def digest_setting(self):
         with self.database() as db:
@@ -306,12 +317,16 @@ class UmaAlerts:
                 nonce=nonce,
             )
         except discord.HTTPException:
-            log.warning("Could not post the weekly digest in channel %s", channel_id, exc_info=True)
+            log.warning(
+                "Could not post the weekly digest in server %s to channel %s",
+                self.guild_id, channel_id, exc_info=True,
+            )
             return
         with self.database() as db:
             db.execute(
                 "UPDATE weekly_digest SET last_sent_week = ? WHERE guild_id = ?", (week, self.guild_id),
             )
+        log.info("Posted the weekly digest in server %s to channel %s", self.guild_id, channel_id)
 
     @tasks.loop(minutes=1)
     async def poll(self):
@@ -372,6 +387,10 @@ class UmaAlerts:
     @poll.before_loop
     async def wait_for_connection(self):
         await self.client.wait_until_ready()
+
+    @poll.error
+    async def log_poll_failure(self, error):
+        log.error("Alert polling stopped in server %s", self.guild_id, exc_info=error)
 
     async def check_cards(self, setting):
         self.released_cards, announcements = await self.feeds.support_releases()
@@ -443,15 +462,20 @@ class UmaAlerts:
             if key in delivered:
                 continue
             if self.posting_setting() != setting:
+                log.info("Skipped an update in server %s because its posting channel changed", self.guild_id)
                 return
             try:
                 await channel.send(**message)
             except discord.HTTPException:
-                log.warning("Could not post an UmaBot update to channel %s", channel_id, exc_info=True)
+                log.warning(
+                    "Could not post an UmaBot update in server %s to channel %s",
+                    self.guild_id, channel_id, exc_info=True,
+                )
                 return
             delivered.add(key)
             with self.database() as db:
                 db.execute("INSERT OR IGNORE INTO news_deliveries VALUES (?, ?)", (self.guild_id, key))
+            log.info("Posted an UmaBot update in server %s to channel %s", self.guild_id, channel_id)
 
     async def check_events(self, due):
         if not due:
@@ -477,9 +501,11 @@ class UmaAlerts:
 
     async def deliver(self, recipients, message, *, topic=None, event_key=None):
         """Send release or event pings and record each successful batch."""
+        alert_kind = "event announcement" if topic is None else "release"
         for offset in range(0, len(recipients), MENTION_BATCH_SIZE):
             setting = self.posting_setting()
             if setting is None:
+                log.info("Skipped alert (%s) in server %s because posting is disabled", alert_kind, self.guild_id)
                 return
             channel_id = setting[0]
             channel = self.client.get_partial_messageable(channel_id)
@@ -496,7 +522,10 @@ class UmaAlerts:
             try:
                 await send_user_ping(channel, users, message)
             except discord.HTTPException:
-                log.warning("Could not send UmaBot alert to channel %s", channel_id, exc_info=True)
+                log.warning(
+                    "Could not send alert (%s) in server %s to channel %s",
+                    alert_kind, self.guild_id, channel_id, exc_info=True,
+                )
                 return
             with self.database() as db:
                 if topic is not None:
@@ -509,3 +538,7 @@ class UmaAlerts:
                         "INSERT OR IGNORE INTO event_deliveries VALUES (?, ?, ?, ?)",
                         [(event_key, user_id, channel_id, time()) for user_id in users],
                     )
+            log.info(
+                "Sent alert (%s) in server %s to channel %s (%d recipients)",
+                alert_kind, self.guild_id, channel_id, len(users),
+            )

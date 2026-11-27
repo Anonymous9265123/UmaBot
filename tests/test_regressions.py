@@ -171,12 +171,18 @@ class DigestTests(unittest.IsolatedAsyncioTestCase):
             channel.send.assert_not_awaited()
             response = SimpleNamespace(status=500, reason="fixture")
             channel.send.side_effect = discord.HTTPException(response, "retry")
-            with self.assertLogs("umabot.alerts", level="WARNING"):
+            with self.assertLogs("umabot.alerts", level="WARNING") as failure:
                 await alerts.check_digest(due)
+            self.assertIn("Could not post the weekly digest in server 1 to channel 10", failure.output[0])
+            self.assertIsNotNone(failure.records[0].exc_info)
             channel.send.side_effect = None
-            await alerts.check_digest(due + timedelta(minutes=1))
-            restarted = UmaAlerts(client, 1, path, feeds)
-            await restarted.check_digest(due + timedelta(hours=1))
+            with self.assertLogs("umabot.alerts", level="INFO") as success:
+                await alerts.check_digest(due + timedelta(minutes=1))
+                restarted = UmaAlerts(client, 1, path, feeds)
+                await restarted.check_digest(due + timedelta(hours=1))
+            self.assertEqual(success.output, [
+                "INFO:umabot.alerts:Posted the weekly digest in server 1 to channel 10",
+            ])
             self.assertEqual(channel.send.await_count, 2)
             self.assertEqual(
                 channel.send.await_args_list[0].kwargs["nonce"], channel.send.await_args_list[1].kwargs["nonce"],
