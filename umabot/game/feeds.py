@@ -30,6 +30,8 @@ CURRENT_BIRTHDAYS_URL = build_url("character/currentbirthdays")
 
 
 class UmaFeeds:
+    """Reuse an HTTP session and share cached game data across requests."""
+
     def __init__(self):
         self.values = {}
         self.refreshes = {}
@@ -103,6 +105,7 @@ class UmaFeeds:
             await self.session.close()
 
     async def cached(self, key, load, empty, *, ttl=FEED_TTL, timeout=None, host=None):
+        """Share one refresh per key and return the cached value on timeout."""
         value, expires = self.values.get(key, (empty, 0))
         if self.closed or monotonic() < expires or (host and self.transport and self.transport.cooling_down(host)):
             return value
@@ -112,6 +115,7 @@ class UmaFeeds:
             self.refreshes[key] = task
         try:
             async with asyncio.timeout(timeout):
+                # Other callers can still use the refresh if this request times out.
                 return await asyncio.shield(task)
         except TimeoutError:
             return value
@@ -126,6 +130,7 @@ class UmaFeeds:
             return previous
         except (aiohttp.ClientError, TimeoutError, ValueError) as error:
             log.warning("Could not refresh %s: %s", key, error)
+            # Keep the previous value during the cooldown before retrying.
             self.values[key] = (previous, monotonic() + RETRY_DELAY)
             return previous
         finally:

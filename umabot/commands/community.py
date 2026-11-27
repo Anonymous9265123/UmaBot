@@ -1,6 +1,7 @@
 """Register EN calendar and event reminder commands."""
 
 import asyncio
+from datetime import datetime
 from time import time
 from urllib.parse import quote
 
@@ -285,7 +286,12 @@ def register_community(group, alerts, get_catalog, get_events, get_projections):
             message = "Weekly digest is off. Use `/uma digest` with a channel to turn it on."
         else:
             hour, minute = divmod(minute, 60)
-            message = f"Weekly digest posts in <#{channel_id}> on {WEEKDAYS[weekday]} at {hour:02d}:{minute:02d} (bot host's local time)."
+            offset = datetime.now().astimezone().strftime("%z")
+            host_zone = "UTC" if offset == "+0000" else f"UTC{offset[:3]}:{offset[3:]}"
+            message = (
+                f"Weekly digest posts in <#{channel_id}> on {WEEKDAYS[weekday]} "
+                f"at {hour:02d}:{minute:02d} (bot host time, currently {host_zone})."
+            )
         await interaction.response.send_message(message, ephemeral=True)
 
     @group.command(name="reminders", description="Turn ending-soon event reminders on or off")

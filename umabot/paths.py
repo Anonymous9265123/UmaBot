@@ -1,10 +1,12 @@
 """Resolve project and runtime paths independently of the working directory."""
 
+import logging
 import os
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+log = logging.getLogger(__name__)
 
 
 def data_path(name):
@@ -15,10 +17,18 @@ def data_path(name):
             raise ValueError("UMABOT_DATA_DIR must be an absolute path.")
         return directory / name
 
-    path = PROJECT_ROOT / "data" / name
-    legacy_path = PROJECT_ROOT / name
-    if not path.exists() and legacy_path.exists():
-        return legacy_path
+    return PROJECT_ROOT / "data" / name
+
+
+def runtime_database_path(name):
+    path = data_path(name)
+    legacy = PROJECT_ROOT / name
+    if not path.exists() and legacy.is_file():
+        log.warning(
+            "UmaBot will use %s. Existing database %s requires a manual copy. "
+            "See README.md under 'Migrate an older alert database'.",
+            path, legacy,
+        )
     return path
 
 

@@ -2,9 +2,7 @@
 
 import asyncio
 import logging
-import os
 import sqlite3
-import sys
 
 import discord
 from discord import app_commands
@@ -12,9 +10,9 @@ from discord import app_commands
 from .alerts import AlertButton, UmaAlerts
 from .commands.feedback import FeedbackInbox
 from .commands.lookup import register_uma
-from .config import save_discord_token, startup_settings
+from .config import discord_token
 from .game.feeds import UmaFeeds
-from .paths import data_path, unnumbered_alert_databases
+from .paths import runtime_database_path, unnumbered_alert_databases
 from .stats import StatsButton
 
 
@@ -22,13 +20,15 @@ log = logging.getLogger(__name__)
 
 
 class UmaBot(discord.Client):
+    """Share game feeds across servers and manage each server's alert loop."""
+
     def __init__(self):
         super().__init__(
             intents=discord.Intents.default(),
             allowed_mentions=discord.AllowedMentions.none(),
         )
         self.feeds = UmaFeeds()
-        self.feedback = FeedbackInbox(data_path("uma-feedback.sqlite3"))
+        self.feedback = FeedbackInbox(runtime_database_path("uma-feedback.sqlite3"))
         self.alerts_by_guild = {}
         self.syncing_guilds = set()
         self.synced_guilds = set()
@@ -48,13 +48,14 @@ class UmaBot(discord.Client):
         self.feedback.initialize()
 
     async def setup_guild(self, guild):
+        """Initialize the server's alert state and sync its slash commands."""
         guild_id = guild.id
         if guild_id in self.synced_guilds or guild_id in self.syncing_guilds:
             return
         self.syncing_guilds.add(guild_id)
         try:
             if guild_id not in self.alerts_by_guild:
-                path = data_path(f"uma-alerts-{guild_id}.sqlite3")
+                path = runtime_database_path(f"uma-alerts-{guild_id}.sqlite3")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 alerts = UmaAlerts(self, guild_id, path, self.feeds)
                 alerts.start()
@@ -99,15 +100,10 @@ class UmaBot(discord.Client):
 
 
 async def run_bot():
-    token, setup_token = startup_settings()
+    """Start the Discord client with the configured token."""
+    token = discord_token()
     async with UmaBot() as bot:
-        await bot.login(token)
-        try:
-            if setup_token and os.name == "nt":
-                save_discord_token(token)
-        except OSError:
-            print("Could not save local Discord settings. You can use environment variables on the next launch.", file=sys.stderr)
-        await bot.connect(reconnect=True)
+        await bot.start(token)
 
 
 def main():

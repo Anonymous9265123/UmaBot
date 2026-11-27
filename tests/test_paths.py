@@ -20,13 +20,13 @@ class DataPathTests(unittest.TestCase):
                 self.assertEqual(data_path(name), root / "persistent" / name)
                 self.assertEqual(data_path("uma-feedback.sqlite3"), root / "persistent" / "uma-feedback.sqlite3")
 
-    def test_unset_directory_keeps_numbered_database_at_project_root(self):
+    def test_unset_directory_uses_project_data_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             name = "uma-alerts-123.sqlite3"
             (root / name).touch()
             with patch("umabot.paths.PROJECT_ROOT", root), patch.dict(os.environ, {"UMABOT_DATA_DIR": ""}):
-                self.assertEqual(data_path(name), root / name)
+                self.assertEqual(data_path(name), root / "data" / name)
                 self.assertEqual(data_path("uma-feedback.sqlite3"), root / "data" / "uma-feedback.sqlite3")
 
     def test_relative_directory_is_rejected(self):

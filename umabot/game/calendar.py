@@ -121,8 +121,8 @@ async def game_events(get_catalog, now, *, ending_within=None):
     events = {}
     for key, category, title, event_id, start, end, row in visible:
         featured = ()
-        if key in banner_names:
-            pickups = (pickup[0] for pickup in row.get("pickups", []) if isinstance(pickup, list) and pickup)
+        if key in banner_names and isinstance(raw_pickups := row.get("pickups"), list):
+            pickups = (pickup[0] for pickup in raw_pickups if isinstance(pickup, list) and pickup)
             featured = featured_names(pickups, banner_names[key])
             title = featured_title(featured) or title
         if not title:

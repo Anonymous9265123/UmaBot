@@ -78,8 +78,8 @@ def register_feedback(group, inbox):
         for feedback_id, guild_id, user_id, submitted_at, text in rows[:PAGE_SIZE]:
             message_text = discord.utils.escape_mentions(discord.utils.escape_markdown(text))
             embed.add_field(
-                name=f"#{feedback_id} · <t:{submitted_at}:f>",
-                value=f"{message_text}\n\nUser `{user_id}` · Server `{guild_id}`",
+                name=f"#{feedback_id} · <t:{submitted_at}:f> · User `{user_id}` · Server `{guild_id}`",
+                value=message_text[:1024],
                 inline=False,
             )
         if len(rows) > PAGE_SIZE:

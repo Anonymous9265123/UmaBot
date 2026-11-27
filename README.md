@@ -34,7 +34,7 @@ After saving the channel, select **Send test post** to verify UmaBot can send an
 
 Keep the bot process running to receive commands and send alerts. Run the same setup command after pulling changes to install any updated dependencies. Add `--install-only` to prepare the environment without connecting to Discord.
 
-On Windows, UmaBot saves an interactively entered token encrypted for your Windows account after a successful login. On macOS or Linux, you can enter the token at startup or supply it through `DISCORD_TOKEN`. For unattended hosting on any OS, configure `DISCORD_TOKEN` in your host's secret settings and start the bot with `python -m umabot` using the environment's Python. An environment token takes precedence over the saved Windows token.
+For unattended hosting, configure `DISCORD_TOKEN` in your host's secret settings and start the bot with `python -m umabot` using the environment's Python. For interactive development, you can also enter the token at startup.
 
 ### Deploy on Fade
 
@@ -58,17 +58,19 @@ Older installations may have an unnumbered `uma-alerts.sqlite3` in the configure
 
 1. Stop the bot and back up the unnumbered database and any numbered databases before upgrading or copying files. Use a SQLite backup tool if you cannot stop the old instance.
 2. Identify the server that owns the old data. Inspect the backup read-only for the guild ID in `news_settings` or `news_deliveries`. An old `DISCORD_GUILD_ID` or `discord-guild-id.txt` is also a clue. Verify the ID using **Copy Server ID** in Discord with Developer Mode enabled. If ownership is unclear, keep the backup and pause the migration.
-3. If `uma-alerts-<guild_id>.sqlite3` is absent, copy the backup under that name into `UMABOT_DATA_DIR` or, for a default local setup, the repository's `data/` folder. For local setups, also check the repository root for an existing numbered file. If both the unnumbered and numbered files exist, inspect separate copies of each before deciding whether any data needs to move. Keep the existing numbered database in place.
+3. If `uma-alerts-<guild_id>.sqlite3` is absent, copy the backup under that name into `UMABOT_DATA_DIR` or, for a default local setup, the repository's `data/` folder. Also check the repository root for an existing numbered file. If both the unnumbered and numbered files exist, inspect separate copies of each before deciding whether any data needs to move. Keep the existing numbered database in place.
 4. Remove the old `DISCORD_GUILD_ID` setting when upgrading, start the bot, and verify the posting channel with `/uma setup` and subscriptions with `/uma subscriptions`.
+
+If an older local installation stored numbered alert or feedback databases at the repository root, stop the bot and back them up before upgrading. Before starting the upgraded bot, copy them into `data/` or your configured `UMABOT_DATA_DIR` only where the corresponding destination is absent. UmaBot logs a warning when a root-level database has no corresponding file in the active data directory.
 
 ## Project layout
 
 - `umabot/` contains the Discord client, startup configuration, alert delivery, and embeds.
 - `umabot/commands/` contains the slash commands.
 - `umabot/game/` contains the game data clients, shared feed cache, and condition formatting.
-- `data/` is created as needed for new databases and ignored by Git. With no `UMABOT_DATA_DIR` set, an existing numbered alert database or feedback database at the repository root is used when its counterpart in `data/` is absent.
+- `data/` is the default SQLite directory when `UMABOT_DATA_DIR` is unset. It is created as needed and ignored by Git.
 
-Start UmaBot with `python -m umabot` from your virtual environment. Existing Windows token files are read from the repository root.
+Start UmaBot with `python -m umabot` from your virtual environment.
 
 ## Using the bot
 

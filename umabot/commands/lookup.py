@@ -76,6 +76,9 @@ class SubscriptionPage(discord.ui.View):
 
 
 async def show_birthdays(interaction, fetch, data):
+    if not isinstance(data, dict):
+        await interaction.edit_original_response(content="The API returned an unexpected format.")
+        return
     entries = list(birthday_entries(data))
     if not entries:
         await interaction.edit_original_response(content="No birthdays found.")

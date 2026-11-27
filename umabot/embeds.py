@@ -83,7 +83,7 @@ def birthday_date(character):
 
 def birthday_entries(data):
     for key, characters in data.items():
-        if not characters:
+        if not isinstance(characters, list):
             continue
 
         heading = key.replace("_", " ").capitalize()
@@ -91,6 +91,8 @@ def birthday_entries(data):
             heading = "Today's birthdays"
 
         for character in characters:
+            if not isinstance(character, dict):
+                continue
             name_en = character.get("name_en")
             name_jp = character.get("name_jp")
             name = name_en or name_jp or "Unknown character"
